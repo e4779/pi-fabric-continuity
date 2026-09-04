@@ -62,5 +62,12 @@ name `pi-fabric-continuity`; one-shot migration recipe instead of an importer.
   history/mutate), before_agent_start injection (token-budgeted), `/harness`
   status|list|history. Probes: `tsc -p tsconfig.build.json &&
   HOME=/tmp/fakehome node tests/journal.probe.mjs`.
-- Next: refine pipeline (memory.recall evidence → LLM proposer → journaled
-  deltas), turn_end cadence, durable-runner recipe.
+- **Refine pipeline implemented** (d9d1d72): /harness refine [lookback] —
+  trajectory evidence (ctx.sessionManager branch, text blocks only, byte-capped)
+  → completeSimple proposer (ACE rules, strict JSON) → validated deltas →
+  journal (source "refine", actor model:provider/id) + session audit entry.
+  turn_end cadence behind ~/.pi/agent/continuity/config.json
+  {"autoRefine":{"enabled":true,"everyTurns":50}}. Probes: 19/19 refine-core,
+  19/19 journal.
+- Next: durable-runner recipe (agents.spawn + continuity.mutate), keep/drop
+  commands, revert transition, migration recipe from old harness-state.md.
