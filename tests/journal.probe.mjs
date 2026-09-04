@@ -75,6 +75,19 @@ appendFileSync(jp, "{not json at all\n");
 const tolerant = await j.currentSnapshot("project", cwd);
 check("corrupt: skipped without crash", tolerant.version === 4 && tolerant.items.length === 1);
 
+// 7b) revert via compensating deltas (append-only, never rewrites)
+// state here: v4, one prompt item (memory was deleted at v4)
+const rev = await j.revertToVersion({ scope: "project", cwd, version: 2, actor: "probe" });
+check("revert: compensating create applied", rev.transitions.length >= 1 && rev.snapshot.version > 4);
+const revSnap = await j.currentSnapshot("project", cwd);
+const revived = revSnap.items.find((i) => i.kind === "memory");
+check("revert: memory item revived with content", revived && revived.content === "prefer TOON over JSON" && revived.importance === 0.9);
+const revHist = await j.history("project", cwd, 5);
+check("revert: note stamped on the revert transition", revHist[0].note === "revert to v2");
+check("revert: older transitions keep no phantom notes", !revHist.slice(1).some((t) => t.note));
+const revAgain = await j.revertToVersion({ scope: "project", cwd, version: 999, actor: "probe" });
+check("revert: future version is a no-op", revAgain.transitions.length === 0);
+
 // 8) scopes are isolated
 const globalSnap = await j.currentSnapshot("global", cwd);
 check("scope: global isolated", globalSnap.items.length === 0 && globalSnap.version === 0);

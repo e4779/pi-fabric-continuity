@@ -14,7 +14,7 @@ import {
   type FabricProviderListRequest,
   type FabricProviderRegistration,
 } from "pi-fabric/protocol";
-import { appendDeltas, currentSnapshot, history, journalPath, validateDelta } from "./journal.js";
+import { appendDeltas, currentSnapshot, history, journalPath, revertToVersion, validateDelta } from "./journal.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
 
 const scopeSchema = { type: "string", enum: ["project", "global"], default: "project" };
@@ -50,6 +50,12 @@ function descriptors(): FabricActionDescriptor[] {
       description: "Recent journal transitions (who/when/why) for audit.",
       risk: "read",
       inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str, limit: { type: "number", default: 20 } }, additionalProperties: false },
+    },
+    {
+      name: "revert",
+      description: "Revert the harness state to a given journal version by appending compensating deltas (the journal is append-only; history is never rewritten).",
+      risk: "write",
+      inputSchema: { type: "object", properties: { version: { type: "number" }, scope: scopeSchema, cwd: str }, required: ["version"], additionalProperties: false },
     },
     {
       name: "mutate",
@@ -117,6 +123,16 @@ function makeProvider(): FabricProvider {
         case "history": {
           const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : 20;
           return { scope, transitions: await history(scope, cwd, limit) };
+        }
+        case "revert": {
+          const version = typeof args.version === "number" ? Math.floor(args.version) : NaN;
+          if (!Number.isFinite(version) || version < 0) throw new Error("version must be a non-negative number");
+          const out = await revertToVersion({ scope, cwd, version, actor });
+          return {
+            revertedTo: version,
+            applied: out.transitions.length,
+            version: out.snapshot.version,
+          };
         }
         case "mutate": {
           if (!Array.isArray(args.deltas)) throw new Error("deltas must be an array");

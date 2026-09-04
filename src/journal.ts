@@ -138,6 +138,7 @@ export async function appendDeltas(opts: {
   actor: string;
   source: Transition["source"];
   deltas: Delta[];
+  note?: string;
 }): Promise<AppendOutcome> {
   for (const d of opts.deltas) {
     const err = validateDelta(d);
@@ -155,7 +156,15 @@ export async function appendDeltas(opts: {
     const ts = Date.now();
     const target = applyDelta(items, delta, ts, opts.scope);
     version += 1;
-    const transition: Transition = { version, ts, actor: opts.actor, source: opts.source, delta, ...(target ? { target } : {}) };
+    const transition: Transition = {
+      version,
+      ts,
+      actor: opts.actor,
+      source: opts.source,
+      delta,
+      ...(target ? { target } : {}),
+      ...(opts.note ? { note: opts.note } : {}),
+    };
     transitions.push(transition);
     lines.push(JSON.stringify(transition));
   }
@@ -164,6 +173,71 @@ export async function appendDeltas(opts: {
   return { transitions, snapshot: { version, items: sortItems([...items.values()]) } };
 }
 
+/** Revert to a journal version by appending compensating deltas.
+ *  The journal is append-only: revert never rewrites history, it emits the
+ *  diff between the current fold and the fold at 'version' as new deltas. */
+export async function revertToVersion(opts: {
+  scope: Scope;
+  cwd?: string;
+  version: number;
+  actor: string;
+}): Promise<AppendOutcome> {
+  const path = journalPath(opts.scope, opts.cwd);
+  const transitions = await readTransitions(path);
+  const latest = transitions.reduce((m, t) => Math.max(m, t.version), 0);
+  const targetVersion = Math.min(Math.max(0, Math.floor(opts.version)), latest);
+  if (targetVersion >= latest) {
+    const snap = await currentSnapshot(opts.scope, opts.cwd);
+    return { transitions: [], snapshot: snap };
+  }
+
+  const target = new Map<string, HarnessItem>();
+  const current = new Map<string, HarnessItem>();
+  for (const t of transitions) {
+    applyDelta(current, t.delta, t.ts, opts.scope, t.target);
+    if (t.version <= targetVersion) applyDelta(target, t.delta, t.ts, opts.scope, t.target);
+  }
+
+  const deltas: Delta[] = [];
+  for (const [id, it] of target) {
+    const cur = current.get(id);
+    if (!cur) {
+      deltas.push({
+        op: "create",
+        kind: it.kind,
+        content: it.content,
+        evidence: it.evidence,
+        importance: it.importance,
+        ...(it.models ? { models: it.models } : {}),
+      });
+      if (!it.active) deltas.push({ op: "update", id, active: false });
+      continue;
+    }
+    const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean; models?: string[] } = { op: "update", id };
+    if (cur.content !== it.content) upd.content = it.content;
+    if (cur.evidence !== it.evidence) upd.evidence = it.evidence;
+    if (cur.importance !== it.importance) upd.importance = it.importance;
+    if (cur.active !== it.active) upd.active = it.active;
+    if ((cur.models ?? undefined) !== (it.models ?? undefined)) upd.models = it.models;
+    if (Object.keys(upd).length > 2) deltas.push(upd);
+  }
+  for (const id of current.keys()) {
+    if (!target.has(id)) deltas.push({ op: "delete", id, reason: `reverted: absent at v${targetVersion}` });
+  }
+
+  if (deltas.length === 0) {
+    const snap = await currentSnapshot(opts.scope, opts.cwd);
+    return { transitions: [], snapshot: snap };
+  }
+  return appendDeltas({
+    scope: opts.scope,
+    cwd: opts.cwd,
+    actor: opts.actor,
+    source: "manual",
+    deltas,
+    note: `revert to v${targetVersion}`,
+  });
+}
 export async function history(scope: Scope, cwd?: string, limit = 20): Promise<Transition[]> {
   const transitions = await readTransitions(journalPath(scope, cwd));
   return transitions.slice(-limit).reverse();

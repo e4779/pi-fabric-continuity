@@ -60,6 +60,8 @@ export interface Transition {
   delta: Delta;
   /** Item id touched by this transition, when resolvable. */
   target?: string;
+  /** Human-readable annotation (e.g. "revert to v3"). */
+  note?: string;
 }
 
 export interface JournalSnapshot {
