@@ -1,0 +1,117 @@
+{
+  "format": 1,
+  "entries": {
+    "topology/peer-seq": {
+      "key": "topology/peer-seq",
+      "value": {
+        "format": 1,
+        "next": 1
+      },
+      "version": 1,
+      "updatedAt": 1788533905347,
+      "updatedBy": {
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+      }
+    },
+    "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": {
+      "key": "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b",
+      "value": {
+        "format": 1,
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "rootId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "identity": {
+          "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+          "name": "main",
+          "kind": "main",
+          "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+        },
+        "startedAt": 1788533905312,
+        "updatedAt": 1788534095517,
+        "expiresAt": 1788534110517
+      },
+      "version": 68,
+      "updatedAt": 1788534095518,
+      "updatedBy": {
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+      }
+    },
+    "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1": {
+      "key": "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+      "value": {
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "name": "PHS-1",
+        "label": "PHS-1",
+        "kind": "peer",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "cwd": "/home/e41q/projects/pi-harness-state",
+        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "model": "zai/glm-5.3",
+        "thinking": "high",
+        "startedAt": 1788533905308,
+        "updatedAt": 1788534095517,
+        "pendingMessages": false,
+        "local": false
+      },
+      "version": 68,
+      "updatedAt": 1788534095520,
+      "updatedBy": {
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+      }
+    },
+    "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": {
+      "key": "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b",
+      "value": {
+        "format": 1,
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "kind": "root",
+        "rootId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "ownerHostId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "ownerIdentityId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "name": "main",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "capabilities": [
+          "steer",
+          "followUp",
+          "fabric"
+        ],
+        "cwd": "/home/e41q/projects/pi-harness-state",
+        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "model": "zai/glm-5.3",
+        "thinking": "high",
+        "startedAt": 1788533905308,
+        "updatedAt": 1788534095517,
+        "pendingMessages": false,
+        "controlProtocol": "v1",
+        "label": "PHS-1"
+      },
+      "version": 68,
+      "updatedAt": 1788534095521,
+      "updatedBy": {
+        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+      }
+    }
+  },
+  "versions": {
+    "topology/peer-seq": 1,
+    "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 68,
+    "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1": 68,
+    "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 68
+  },
+  "tombstoneOrder": []
+}
