@@ -3,7 +3,6 @@
 // that spawns an agent calling continuity.mutate — same journal, same discipline.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -41,11 +40,8 @@ export interface RefineResult {
   skipped?: string;
 }
 
-type AnyModel = Parameters<typeof completeSimple>[0];
-type AnyContext = Parameters<typeof completeSimple>[1];
-
 /** Bump when refine behavior changes; appears in last-refine.log. */
-const REFINE_LOG_VERSION = 2;
+const REFINE_LOG_VERSION = 3;
 
 /** Best-effort debug log of the last refine run: never breaks refine itself. */
 async function writeRefineDebugLog(entry: Record<string, unknown>): Promise<void> {
@@ -71,20 +67,20 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     await ctx.ui.notify("continuity refine: skipped — no trajectory evidence found", "info");
     return { ...base, evidenceBytes: 0, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no trajectory evidence" };
   }
-  const model = (ctx as unknown as { model?: AnyModel }).model;
-  if (!model) {
-    await ctx.ui.notify("continuity refine: skipped — no active model", "info");
-    return { ...base, evidenceBytes: evidence.length, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no active model" };
+  const registry = ctx.modelRegistry;
+  const model = (ctx as unknown as { model?: unknown }).model as Parameters<typeof registry.complete>[0] | undefined;
+  if (!registry || !model) {
+    await ctx.ui.notify("continuity refine: skipped — no model registry or active model", "info");
+    return { ...base, evidenceBytes: evidence.length, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no model registry or active model" };
   }
 
   const context = {
-    system: PROPOSER_SYSTEM,
-    messages: [{ role: "user", content: [{ type: "text", text: buildUserText(snap.items, evidence, opts.instructions) }] }],
-  } as unknown as AnyContext;
-  const msg = (await completeSimple(model, context, {
-    // Keep the proposer lean: minimal reasoning, bounded output.
-    reasoning: "minimal",
+    systemPrompt: PROPOSER_SYSTEM,
+    messages: [{ role: "user", content: buildUserText(snap.items, evidence, opts.instructions), timestamp: Date.now() }],
+  } as unknown as Parameters<typeof registry.complete>[1];
+  const msg = (await registry.complete(model, context, {
     maxTokens: 4096,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
   })) as unknown as { content: unknown; stopReason?: unknown; error?: unknown; usage?: unknown; responseModel?: unknown };
   const replyText = textOf(msg.content).trim();
   const parsed = parseProposerOutput(replyText);
