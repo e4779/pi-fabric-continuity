@@ -69,5 +69,12 @@ name `pi-fabric-continuity`; one-shot migration recipe instead of an importer.
   turn_end cadence behind ~/.pi/agent/continuity/config.json
   {"autoRefine":{"enabled":true,"everyTurns":50}}. Probes: 19/19 refine-core,
   19/19 journal.
-- Next: durable-runner recipe (agents.spawn + continuity.mutate), keep/drop
-  commands, revert transition, migration recipe from old harness-state.md.
+- **Hygiene commands implemented** (671566d): /harness keep|drop (importance
+  as journaled transitions), /harness revert <version> (compensating deltas,
+  append-only — history is never rewritten), dynamic argument completions
+  (subcommands, kinds, item ids, journal versions). Probes: 24/24 journal,
+  20/20 refine-core.
+- Durable-runner and migration recipes: [docs/durable-recipe.md](docs/durable-recipe.md).
+- v1 surface complete. Live-verified: provider calls from fabric_exec, journal
+  persistence, /harness refine end-to-end. Recipe-stage (verify on first use):
+  durable cadence, migration import.
