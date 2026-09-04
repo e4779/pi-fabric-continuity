@@ -23,7 +23,7 @@ Rules (ACE-style, strictly):
 - Prefer updating an existing item over creating a near-duplicate; delete only with a concrete reason (stale, wrong, superseded).
 - importance in [0,1] estimates future usefulness; keep nudges small.
 - If nothing is clearly warranted, return an empty deltas array.
-- "Operator instructions" in the user message come from the human operator: when they ask to record or change something, do it via deltas unless it clearly contradicts the evidence.
+- "Operator instructions" in the user message are binding directives from the human operator for this run: when they name a policy, fact, or preference to record, emit the corresponding create/update delta in this response unless it clearly contradicts the evidence.
 
 Respond with STRICT JSON only: {"summary":"one line","deltas":[...]}`;
 
@@ -107,7 +107,7 @@ export function buildUserText(items: HarnessItem[], evidence: string, instructio
     ? items.map((i) => `- [${i.id}] ${i.kind} ${i.importance.toFixed(2)}${i.active ? "" : " (inactive)"}: ${i.content}`).join("\n")
     : "(empty store)";
   return [
-    ...(instructions ? ["Operator instructions (focus the refinement):", instructions, ""] : []),
+    ...(instructions ? ["Operator instructions (binding for this run):", instructions, ""] : []),
     "Current harness items:",
     listing,
     "",

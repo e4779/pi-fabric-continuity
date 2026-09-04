@@ -60,7 +60,7 @@ check("cadence: disabled never fires", c.evaluateCadence({ enabled: false, every
 
 // buildUserText with operator instructions
 const ui2 = c.buildUserText([], "ev", "focus on git discipline");
-check("usertext: instructions prepended", ui2.includes("Operator instructions (focus the refinement):") && ui2.includes("focus on git discipline"));
+check("usertext: instructions prepended", ui2.includes("Operator instructions (binding for this run):") && ui2.includes("focus on git discipline"));
 const ui3 = c.buildUserText([], "ev");
 check("usertext: no instructions section when absent", !ui3.includes("Operator instructions"));
 

@@ -4,6 +4,9 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import {
   DEFAULT_LOOKBACK_TURNS,
@@ -41,6 +44,20 @@ export interface RefineResult {
 type AnyModel = Parameters<typeof completeSimple>[0];
 type AnyContext = Parameters<typeof completeSimple>[1];
 
+/** Bump when refine behavior changes; appears in last-refine.log. */
+const REFINE_LOG_VERSION = 2;
+
+/** Best-effort debug log of the last refine run: never breaks refine itself. */
+async function writeRefineDebugLog(entry: Record<string, unknown>): Promise<void> {
+  try {
+    const dir = join(homedir(), ".pi", "agent", "continuity");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "last-refine.log"), JSON.stringify(entry, null, 2), "utf8");
+  } catch {
+    // Logging must never break a refine run.
+  }
+}
+
 export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: RefineOptions = {}): Promise<RefineResult> {
   const scope = opts.scope ?? "project";
   const lookback = opts.lookback ?? DEFAULT_LOOKBACK_TURNS;
@@ -65,8 +82,25 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     messages: [{ role: "user", content: [{ type: "text", text: buildUserText(snap.items, evidence, opts.instructions) }] }],
   } as unknown as AnyContext;
   const msg = (await completeSimple(model, context)) as unknown as { content: unknown };
-  const parsed = parseProposerOutput(textOf(msg.content));
+  const replyText = textOf(msg.content).trim();
+  const parsed = parseProposerOutput(replyText);
   const deltas = (parsed?.deltas ?? []).filter((d): d is Delta => validateDelta(d) === null);
+  const modelId = model as unknown as { provider: string; id: string };
+  await writeRefineDebugLog({
+    logVersion: REFINE_LOG_VERSION,
+    ts: new Date().toISOString(),
+    scope,
+    cwd,
+    lookback,
+    instructions: opts.instructions ?? null,
+    model: `${modelId.provider}/${modelId.id}`,
+    evidenceChars: evidence.length,
+    replyChars: replyText.length,
+    reply: replyText.slice(0, 4000),
+    parsedOk: parsed !== null,
+    proposedCount: parsed?.deltas.length ?? 0,
+    appliedCount: deltas.length,
+  });
 
   let applied = 0;
   let version = snap.version;
@@ -83,7 +117,6 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       ts: Date.now(),
     });
   }
-  const replyText = textOf(msg.content).trim();
   const unparseable = replyText.length > 0 && parsed === null;
   const summary = unparseable
     ? "proposer output unparseable — no deltas applied"
