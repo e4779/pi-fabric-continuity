@@ -4,14 +4,20 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { currentSnapshot, history } from "./journal.js";
+import { runRefine } from "./refine.js";
 
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
-    description: "continuity: status | list | history [n] — inspect the harness journal",
+    description: "continuity: status | list | history [n] | refine [lookback] — inspect and refine the harness journal",
     handler: async (args: string, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const sub = parts[0] ?? "status";
       const cwd = process.cwd();
+      if (sub === "refine") {
+        const lookback = Number(parts[1]) > 0 ? Number(parts[1]) : undefined;
+        await runRefine(pi, ctx, { lookback });
+        return;
+      }
       if (sub === "list") {
         const snap = await currentSnapshot("project", cwd);
         const lines = snap.items.map(

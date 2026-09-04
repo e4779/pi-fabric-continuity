@@ -10,10 +10,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerHarnessCommand } from "./commands.js";
 import { registerInjection } from "./inject.js";
 import { currentSnapshot } from "./journal.js";
+import { registerAutoRefine, resetCadence } from "./refine.js";
 import { registerContinuityProvider } from "./provider.js";
 
 export default function piFabricContinuity(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
+    resetCadence();
     try {
       const snap = await currentSnapshot("project", process.cwd());
       if (snap.items.length > 0) {
@@ -27,6 +29,7 @@ export default function piFabricContinuity(pi: ExtensionAPI): void {
   registerInjection(pi);
   registerContinuityProvider(pi);
   registerHarnessCommand(pi);
+  registerAutoRefine(pi);
 }
 
 export { appendDeltas, currentSnapshot, history, journalPath, readTransitions, validateDelta } from "./journal.js";
