@@ -16,21 +16,25 @@
 
 ## Command surface (draft)
 
-- `/harness status | list | show <id>` — inspect via `state.get` + `state.history`.
+- `/harness status | list | show <id>` — inspect via `continuity.list/read/history`.
 - `/harness refine [n]` — run refine now (fabric_exec program: memory.recall → propose → state.transition).
 - `/harness keep|drop <id>` — importance hygiene as transitions.
-- Model tools: `harness_list` / `harness_mutate` equivalents backed by the state provider.
+- Provider actions `continuity.list/read/history/mutate/refine/status` — callable as tools, from `/harness` commands, and from any fabric_exec program (incl. spawned durable agents).
 
 ## Data model (draft)
 
 `HarnessItem {id, kind, content, evidence, importance, active, scope: session|project|global, timestamps}`
-Delta = `create|update|delete(reason)` mapped 1:1 to `state.transition` (label `kind:id`, summary = evidence, tags `[kind, op]`).
+Delta = `create|update|delete(reason)` mapped 1:1 to journal transitions (op, target, evidence, actor, ts).
+
+## Integration seam (decided 2026-09-04)
+
+Sanctioned surface only: `pi-fabric/protocol` (public export). The extension registers a `FabricProvider` via `pi.events.emit(FABRIC_PROVIDER_REGISTER_EVENT, ...)` (+ `FABRIC_PROVIDER_DISCOVER_EVENT` subscription). Actions become first-class `continuity.*` calls inside fabric_exec with fabric-side validation, risk policy, nested-call audit, cancellation. `StateStore`/`MeshStore` are NOT exported (exports map: `.` and `./protocol`) — deep imports would be fragile; provider-owns-state is the documented model.
 
 ## Storage mapping
 
-- Authority: mesh CAS key per scope (e.g. `state/harness/<scope>/current`), journal in `fabric.state` topic.
+- Authority: **provider-owned journal** — `~/.pi/agent/continuity/<scope>/journal.jsonl` (append-only deltas) + folded `snapshot.json` (versioned). Same discipline as the mesh: one authority, state derived from journal, explicit revert transitions.
 - Trajectory: `memory.recall/walk`, `branches:"active"`.
-- Refine runner: durable one-shot (`agents.spawn`, `residency:"durable"`), triggers: turn cadence, `state.violated`, failed `checkGoal`.
+- Refine runner: inline at `turn_end` cadence (v1); durable path = documented recipe — fabric_exec one-liner `agents.spawn({task: "continuity.refine …", residency: "durable"})`, since provider actions are guest-callable.
 
 ## Injection
 
@@ -43,7 +47,7 @@ Mesh state lives **outside** the session tree: /tree rewind does not roll harnes
 ## Acceptance criteria
 
 1. Fresh session, same project: harness state visible with zero manual steps.
-2. Every mutation is a journaled transition with evidence; `state.history` shows who/when/why.
+2. Every mutation is a journaled transition with evidence; `continuity.history` shows who/when/why.
 3. Refine output: deltas with evidence, applied via CAS; failed refine leaves state untouched.
 4. Background refine survives session close; results appear next turn.
 5. Injection respects the token budget.

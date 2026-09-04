@@ -5,79 +5,79 @@
       "key": "topology/peer-seq",
       "value": {
         "format": 1,
-        "next": 1
+        "next": 2
       },
-      "version": 1,
-      "updatedAt": 1788533905347,
+      "version": 2,
+      "updatedAt": 1788536739156,
       "updatedBy": {
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
         "kind": "main",
-        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+        "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492"
       }
     },
-    "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": {
-      "key": "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b",
+    "topology/hosts/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": {
+      "key": "topology/hosts/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204",
       "value": {
         "format": 1,
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
-        "rootId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
+        "rootId": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "identity": {
-          "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+          "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
           "name": "main",
           "kind": "main",
-          "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+          "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492"
         },
-        "startedAt": 1788533905312,
-        "updatedAt": 1788534516198,
-        "expiresAt": 1788534531198
+        "startedAt": 1788536739127,
+        "updatedAt": 1788536857537,
+        "expiresAt": 1788536872537
       },
-      "version": 162,
-      "updatedAt": 1788534516201,
+      "version": 43,
+      "updatedAt": 1788536857539,
       "updatedBy": {
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
         "kind": "main",
-        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+        "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492"
       }
     },
-    "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1": {
-      "key": "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+    "sessions/01a06cf7-b523-715e-8cf2-916753e3f492": {
+      "key": "sessions/01a06cf7-b523-715e-8cf2-916753e3f492",
       "value": {
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
-        "name": "PHS-1",
-        "label": "PHS-1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
+        "name": "PFC-2",
+        "label": "PFC-2",
         "kind": "peer",
         "status": "running",
         "runner": "pi",
         "transport": "host",
-        "cwd": "/home/e41q/projects/pi-harness-state",
-        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "cwd": "/home/e41q/projects/pi-fabric-continuity",
+        "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492",
         "model": "zai/glm-5.3",
         "thinking": "high",
-        "startedAt": 1788533905308,
-        "updatedAt": 1788534516198,
+        "startedAt": 1788536739127,
+        "updatedAt": 1788536857537,
         "pendingMessages": false,
         "local": false
       },
-      "version": 162,
-      "updatedAt": 1788534516203,
+      "version": 43,
+      "updatedAt": 1788536857540,
       "updatedBy": {
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
         "kind": "main",
-        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+        "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492"
       }
     },
-    "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": {
-      "key": "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b",
+    "topology/participants/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": {
+      "key": "topology/participants/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204",
       "value": {
         "format": 1,
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "kind": "root",
-        "rootId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
-        "ownerHostId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
-        "ownerIdentityId": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "rootId": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
+        "ownerHostId": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
+        "ownerIdentityId": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
         "status": "running",
         "runner": "pi",
@@ -87,31 +87,38 @@
           "followUp",
           "fabric"
         ],
-        "cwd": "/home/e41q/projects/pi-harness-state",
-        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "cwd": "/home/e41q/projects/pi-fabric-continuity",
+        "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492",
         "model": "zai/glm-5.3",
         "thinking": "high",
-        "startedAt": 1788533905308,
-        "updatedAt": 1788534516198,
+        "startedAt": 1788536739127,
+        "updatedAt": 1788536857537,
         "pendingMessages": false,
         "controlProtocol": "v1",
-        "label": "PHS-1"
+        "label": "PFC-2"
       },
-      "version": 162,
-      "updatedAt": 1788534516205,
+      "version": 43,
+      "updatedAt": 1788536857542,
       "updatedBy": {
-        "id": "session:01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+        "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
         "kind": "main",
-        "sessionId": "01a06ceb-6e88-748b-aa0e-3885c76d35b1"
+        "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492"
       }
     }
   },
   "versions": {
-    "topology/peer-seq": 1,
-    "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 162,
-    "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1": 162,
-    "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 162
+    "topology/peer-seq": 2,
+    "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 170,
+    "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1": 169,
+    "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 170,
+    "topology/hosts/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": 43,
+    "sessions/01a06cf7-b523-715e-8cf2-916753e3f492": 43,
+    "topology/participants/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": 43
   },
-  "tombstoneOrder": []
+  "tombstoneOrder": [
+    "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1",
+    "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b",
+    "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b"
+  ]
 }
