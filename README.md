@@ -56,4 +56,11 @@ Design agreed 2026-09-04; decisions applied 2026-09-04: scope-based binding
 (project default, global opt-in, optional models[] hint — no per-model ownership);
 runner-agnostic refine pipeline (inline default for manual, durable for cadence);
 name `pi-fabric-continuity`; one-shot migration recipe instead of an importer.
-Nothing implemented yet.
+- **v0 skeleton implemented** (typecheck clean, 19/19 journal probes green):
+  provider-owned journal (append-only, atomic batches, corrupt-line tolerant,
+  stable ids across folds), `continuity` FabricProvider (status/list/read/
+  history/mutate), before_agent_start injection (token-budgeted), `/harness`
+  status|list|history. Probes: `tsc -p tsconfig.build.json &&
+  HOME=/tmp/fakehome node tests/journal.probe.mjs`.
+- Next: refine pipeline (memory.recall evidence → LLM proposer → journaled
+  deltas), turn_end cadence, durable-runner recipe.

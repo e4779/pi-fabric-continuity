@@ -56,10 +56,12 @@ export function validateDelta(d: unknown): string | null {
   return "delta.op must be create|update|delete";
 }
 
-/** Apply one delta to the fold state. Returns the touched item id, when resolvable. */
-function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, scope: Scope): string | null {
+/** Apply one delta to the fold state. Returns the touched item id, when resolvable.
+ *  'target' is the recorded id from the journal line: folds MUST reuse it, or
+ *  ids would be regenerated on every read and updates/deletes would miss. */
+function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, scope: Scope, target?: string): string | null {
   if (delta.op === "create") {
-    const id = genId();
+    const id = target ?? genId();
     items.set(id, {
       id,
       kind: delta.kind,
@@ -119,7 +121,7 @@ export async function currentSnapshot(scope: Scope, cwd?: string): Promise<Journ
   let version = 0;
   for (const t of transitions) {
     version = Math.max(version, t.version);
-    applyDelta(items, t.delta, t.ts, scope);
+    applyDelta(items, t.delta, t.ts, scope, t.target);
   }
   return { version, items: sortItems([...items.values()]) };
 }
@@ -145,7 +147,7 @@ export async function appendDeltas(opts: {
   const existing = await readTransitions(path);
   let version = existing.reduce((m, t) => Math.max(m, t.version), 0);
   const items = new Map<string, HarnessItem>();
-  for (const t of existing) applyDelta(items, t.delta, t.ts, opts.scope);
+  for (const t of existing) applyDelta(items, t.delta, t.ts, opts.scope, t.target);
 
   const transitions: Transition[] = [];
   const lines: string[] = [];
