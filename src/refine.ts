@@ -20,6 +20,8 @@ import type { Delta, Scope } from "./types.js";
 export interface RefineOptions {
   lookback?: number;
   scope?: Scope;
+  /** Free-text focus from the operator, prepended to the proposer's user message. */
+  instructions?: string;
   /** true when fired by the turn_end cadence (audit tag). */
   auto?: boolean;
 }
@@ -58,7 +60,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
 
   const context = {
     system: PROPOSER_SYSTEM,
-    messages: [{ role: "user", content: [{ type: "text", text: buildUserText(snap.items, evidence) }] }],
+    messages: [{ role: "user", content: [{ type: "text", text: buildUserText(snap.items, evidence, opts.instructions) }] }],
   } as unknown as AnyContext;
   const msg = (await completeSimple(model, context)) as unknown as { content: unknown };
   const parsed = parseProposerOutput(textOf(msg.content));

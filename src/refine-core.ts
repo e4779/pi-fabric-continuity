@@ -101,11 +101,12 @@ export function gatherEvidence(
 }
 
 /** Build the proposer's user message: current store + evidence. */
-export function buildUserText(items: HarnessItem[], evidence: string): string {
+export function buildUserText(items: HarnessItem[], evidence: string, instructions?: string): string {
   const listing = items.length
     ? items.map((i) => `- [${i.id}] ${i.kind} ${i.importance.toFixed(2)}${i.active ? "" : " (inactive)"}: ${i.content}`).join("\n")
     : "(empty store)";
   return [
+    ...(instructions ? ["Operator instructions (focus the refinement):", instructions, ""] : []),
     "Current harness items:",
     listing,
     "",

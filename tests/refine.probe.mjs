@@ -58,6 +58,12 @@ check("cadence: fires at interval", c.evaluateCadence(auto, 15, 5).fire === true
 check("cadence: fire resets baseline", c.evaluateCadence(auto, 15, 5).next === 15);
 check("cadence: disabled never fires", c.evaluateCadence({ enabled: false, everyTurns: 1 }, 100, 0).fire === false);
 
+// buildUserText with operator instructions
+const ui2 = c.buildUserText([], "ev", "focus on git discipline");
+check("usertext: instructions prepended", ui2.includes("Operator instructions (focus the refinement):") && ui2.includes("focus on git discipline"));
+const ui3 = c.buildUserText([], "ev");
+check("usertext: no instructions section when absent", !ui3.includes("Operator instructions"));
+
 // buildUserText
 const u = c.buildUserText([{ id: "c_1", kind: "prompt", content: "note", evidence: "e", importance: 0.7, active: true, scope: "project", createdAt: 1, updatedAt: 1 }], "user: hi");
 check("usertext: lists items", u.includes("[c_1] prompt 0.70: note"));

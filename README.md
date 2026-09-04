@@ -29,7 +29,10 @@ ln -s ~/projects/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuit
 /harness status            # journal versions + item counts (project & global)
 /harness list [kind]       # items, optionally filtered by prompt|memory|skill|subagent
 /harness history [n]       # recent journal transitions (who/when/why)
-/harness refine [lookback] # trajectory evidence -> LLM proposer -> journaled deltas
+/harness refine [lookback] [instructions]
+                          # trajectory evidence -> LLM proposer -> journaled deltas;
+                          # /refine is an alias. Free text after the optional
+                          # number focuses the proposer (e.g. /refine git discipline)
 /harness keep|drop <id>    # importance hygiene (+/-0.1, as transitions)
 /harness revert <version>  # compensating deltas; the journal is never rewritten
 ```

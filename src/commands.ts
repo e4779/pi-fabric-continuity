@@ -2,7 +2,7 @@
 // v0: status | list | history [n]. Mutations go through the provider
 // (continuity.mutate) so every change is journaled with an actor.
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendDeltas, currentSnapshot, history, revertToVersion } from "./journal.js";
 import { runRefine } from "./refine.js";
 
@@ -57,12 +57,7 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
       const sub = parts[0] ?? "status";
       const cwd = process.cwd();
       if (sub === "refine") {
-        const lookback = Number(parts[1]) > 0 ? Number(parts[1]) : undefined;
-        try {
-          await runRefine(pi, ctx, { lookback });
-        } catch (err) {
-          await ctx.ui.notify(`continuity refine failed: ${String(err)}`, "warning");
-        }
+        await runRefineCommand(pi, ctx, parts.slice(1));
         return;
       }
       if (sub === "keep" || sub === "drop") {
@@ -122,4 +117,22 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
       );
     },
   });
+
+  // Muscle-memory alias for the old continual-harness command name.
+  pi.registerCommand("refine", {
+    description: "continuity: alias for /harness refine [lookback] [instructions]",
+    handler: async (args: string, ctx) => {
+      await runRefineCommand(pi, ctx, args.trim().split(/\s+/).filter(Boolean));
+    },
+  });
+}
+
+async function runRefineCommand(pi: ExtensionAPI, ctx: ExtensionContext, parts: string[]): Promise<void> {
+  const lookback = Number(parts[0]) > 0 ? Number(parts[0]) : undefined;
+  const instructions = (lookback !== undefined ? parts.slice(1) : parts).join(" ").trim() || undefined;
+  try {
+    await runRefine(pi, ctx, { lookback, ...(instructions ? { instructions } : {}) });
+  } catch (err) {
+    await ctx.ui.notify(`continuity refine failed: ${String(err)}`, "warning");
+  }
 }

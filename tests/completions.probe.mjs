@@ -14,7 +14,8 @@ await j.appendDeltas({ scope: "project", actor: "probe", source: "manual", delta
 ] });
 
 let registered = null;
-const fakePi = { registerCommand: (name, opts) => { if (name === "harness") registered = opts; } };
+let registeredNames = [];
+const fakePi = { registerCommand: (name, opts) => { registeredNames.push(name); if (name === "harness") registered = opts; } };
 const commands = await import(cPath);
 commands.registerHarnessCommand(fakePi);
 const complete = (t) => registered.getArgumentCompletions(t);
@@ -60,6 +61,9 @@ check("revert: versions suggested with subcommand", Array.isArray(revSpace) && r
 // unknown subcommand -> null
 const bogus = await resolve(complete("bogus "));
 check("unknown: returns null", bogus === null);
+
+// /refine alias registered
+check("alias: /refine command registered", registeredNames.includes("refine"));
 
 const fails = results.filter((r) => r.startsWith("FAIL")).length;
 console.log(results.join("\n"));
