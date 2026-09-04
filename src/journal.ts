@@ -36,6 +36,9 @@ function genId(): string {
 export function validateDelta(d: unknown): string | null {
   if (typeof d !== "object" || d === null) return "delta must be an object";
   const rec = d as Record<string, unknown>;
+  if (rec.scope !== undefined && rec.scope !== "project" && rec.scope !== "global") {
+    return "scope must be project|global";
+  }
   if (rec.op === "create") {
     if (!KINDS.includes(rec.kind as ComponentKind)) return "create.kind must be one of prompt|memory|skill|subagent";
     if (typeof rec.content !== "string" || !rec.content.trim()) return "create.content required";
@@ -90,6 +93,17 @@ function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, s
   return items.delete(delta.id) ? delta.id : null;
 }
 
+/** Group deltas by their target scope for routing across journals. */
+export function splitByScope(deltas: Delta[], defaultScope: Scope): Map<Scope, Delta[]> {
+  const out = new Map<Scope, Delta[]>([
+    ["project", []],
+    ["global", []],
+  ]);
+  for (const d of deltas) {
+    out.get(d.scope ?? defaultScope)!.push(d);
+  }
+  return out;
+}
 export function sortItems(items: HarnessItem[]): HarnessItem[] {
   return [...items].sort((a, b) => b.importance - a.importance || a.createdAt - b.createdAt);
 }

@@ -58,6 +58,13 @@ check("cadence: fires at interval", c.evaluateCadence(auto, 15, 5).fire === true
 check("cadence: fire resets baseline", c.evaluateCadence(auto, 15, 5).next === 15);
 check("cadence: disabled never fires", c.evaluateCadence({ enabled: false, everyTurns: 1 }, 100, 0).fire === false);
 
+// buildUserText global section
+const gu = c.buildUserText([{ id: "c_p", kind: "prompt", content: "p", evidence: "e", importance: 0.5, active: true, scope: "project", createdAt: 1, updatedAt: 1 }], "ev", undefined, [{ id: "c_g", kind: "memory", content: "g", evidence: "e", importance: 0.7, active: true, scope: "global", createdAt: 1, updatedAt: 1 }]);
+check("usertext: sections labeled by scope", gu.includes("Current harness items (project):") && gu.includes("Current harness items (global):"));
+check("usertext: global items marked", gu.includes("[c_g] (global) memory 0.70: g"));
+const gu2 = c.buildUserText([], "ev", undefined, []);
+check("usertext: no global section when empty", !gu2.includes("(global):"));
+
 // buildUserText with operator instructions
 const ui2 = c.buildUserText([], "ev", "focus on git discipline");
 check("usertext: instructions prepended", ui2.includes("Operator instructions (binding for this run):") && ui2.includes("focus on git discipline"));

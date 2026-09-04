@@ -16,7 +16,7 @@ import {
   parseProposerOutput,
   textOf,
 } from "./refine-core.js";
-import { appendDeltas, currentSnapshot, validateDelta } from "./journal.js";
+import { appendDeltas, currentSnapshot, splitByScope, validateDelta } from "./journal.js";
 import { sessionCwdOf } from "./session-cwd.js";
 import type { Delta, Scope } from "./types.js";
 
@@ -62,6 +62,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
 
   await ctx.ui.notify("continuity refine: proposing (real model call, may take ~30s)…", "info");
   const snap = await currentSnapshot(scope, cwd);
+  const globalSnap = scope === "project" ? await currentSnapshot("global", cwd) : snap;
   const branch = (ctx.sessionManager as unknown as { getBranch(): Iterable<unknown> }).getBranch();
   const evidence = gatherEvidence(branch, lookback);
   if (!evidence.trim()) {
@@ -77,7 +78,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
 
   const context = {
     systemPrompt: PROPOSER_SYSTEM,
-    messages: [{ role: "user", content: buildUserText(snap.items, evidence, opts.instructions), timestamp: Date.now() }],
+    messages: [{ role: "user", content: buildUserText(snap.items, evidence, opts.instructions, scope === "project" ? globalSnap.items : undefined), timestamp: Date.now() }],
   } as unknown as Parameters<typeof registry.complete>[1];
   const msg = (await registry.complete(model, context, {
     maxTokens: 4096,
@@ -96,6 +97,8 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     instructions: opts.instructions ?? null,
     model: `${modelId.provider}/${modelId.id}`,
     evidenceChars: evidence.length,
+    globalItemCount: globalSnap.items.length,
+    routed: [...splitByScope(deltas, scope)].filter(([, g]) => g.length > 0).map(([s, g]) => `${g.length}->${s}`),
     replyChars: replyText.length,
     reply: replyText.slice(0, 4000),
     stopReason: typeof msg.stopReason === "string" ? msg.stopReason : null,
@@ -110,15 +113,21 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
 
   let applied = 0;
   let version = snap.version;
+  const routed: string[] = [];
   if (deltas.length > 0) {
-    const actor = `model:${(model as unknown as { provider: string; id: string }).provider}/${(model as unknown as { provider: string; id: string }).id}`;
-    const out = await appendDeltas({ scope, cwd, actor, source: "refine", deltas });
-    applied = out.transitions.length;
-    version = out.snapshot.version;
+    const actor = `model:${modelId.provider}/${modelId.id}`;
+    for (const [targetScope, group] of splitByScope(deltas, scope)) {
+      if (group.length === 0) continue;
+      const out = await appendDeltas({ scope: targetScope, cwd, actor, source: "refine", deltas: group });
+      applied += out.transitions.length;
+      if (targetScope === scope) version = out.snapshot.version;
+      routed.push(`${group.length}->${targetScope}`);
+    }
     pi.appendEntry("continuity-refinement", {
       source: opts.auto ? "auto" : "manual",
       summary: parsed?.summary ?? "",
       applied,
+      routed,
       version,
       ts: Date.now(),
     });
@@ -130,7 +139,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     : unparseable
       ? "proposer output unparseable — no deltas applied"
       : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
-  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s), journal v${version})`, "info");
+  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
   return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version };
 }
 

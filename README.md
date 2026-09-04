@@ -66,8 +66,10 @@ Three roles, one journal:
    to audit who changed what and why, `/harness revert <v>` to undo a bad refine.
    Every mutation is journaled; nothing happens outside the audit trail.
 
-Scopes: `project` per working directory (default), `global` for cross-project
-principles (via the provider's `scope: "global"`).
+Scopes: `project` per working directory (default) and `global` for cross-project
+principles. The refine proposer decides per delta (it sees both stores and the
+scope rules); explicit calls can pin `scope` per delta or per batch. Global
+items inject into every project.
 
 
 ## Storage

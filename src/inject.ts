@@ -99,7 +99,14 @@ export function registerInjection(pi: ExtensionAPI): void {
       return;
     }
     if (snap.items.length === 0) return;
-    const block = renderContinuityBlock(snap.items, modelKeyOf(ctx.model as { provider: string; id: string } | undefined), cfg);
+    let items = snap.items;
+    try {
+      const globalSnap = await currentSnapshot("global", cwd);
+      if (globalSnap.items.length > 0) items = [...globalSnap.items, ...snap.items];
+    } catch {
+      // Global journal unavailable — project items only.
+    }
+    const block = renderContinuityBlock(items, modelKeyOf(ctx.model as { provider: string; id: string } | undefined), cfg);
     if (!block) return;
     return { systemPrompt: event.systemPrompt + "\n" + block };
   });

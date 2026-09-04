@@ -12,6 +12,8 @@ export const PROPOSER_SYSTEM = `You are the continuity refiner for a coding agen
 
 Item kinds: prompt (behavioral note to the agent itself), memory (durable fact), skill (how to use a capability well), subagent (reusable delegation spec).
 
+Scopes: every delta may carry "scope": "project" (default — this codebase/workflow only) or "global" (a universal agent principle worth carrying across ALL projects). Reserve "global" for genuinely universal lessons, not project-specific bugs or conventions.
+
 Delta JSON shapes:
 - {"op":"create","kind":"prompt|memory|skill|subagent","content":"...","evidence":"...","importance":0.0-1.0}
 - {"op":"update","id":"...","content":"...","evidence":"...","importance":0.0-1.0,"active":true}
@@ -102,14 +104,18 @@ export function gatherEvidence(
 }
 
 /** Build the proposer's user message: current store + evidence. */
-export function buildUserText(items: HarnessItem[], evidence: string, instructions?: string): string {
+export function buildUserText(items: HarnessItem[], evidence: string, instructions?: string, globalItems?: HarnessItem[]): string {
   const listing = items.length
     ? items.map((i) => `- [${i.id}] ${i.kind} ${i.importance.toFixed(2)}${i.active ? "" : " (inactive)"}: ${i.content}`).join("\n")
     : "(empty store)";
+  const globalListing = globalItems && globalItems.length
+    ? globalItems.map((i) => `- [${i.id}] (global) ${i.kind} ${i.importance.toFixed(2)}${i.active ? "" : " (inactive)"}: ${i.content}`).join("\n")
+    : "";
   return [
     ...(instructions ? ["Operator instructions (binding for this run):", instructions, ""] : []),
-    "Current harness items:",
+    "Current harness items (project):",
     listing,
+    ...(globalListing ? ["", "Current harness items (global):", globalListing] : []),
     "",
     "Recent trajectory evidence:",
     evidence,

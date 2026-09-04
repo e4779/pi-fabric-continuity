@@ -36,6 +36,7 @@ export type Delta =
       evidence: string;
       importance?: number;
       models?: string[];
+      scope?: Scope;
     }
   | {
       op: "update";
@@ -45,8 +46,9 @@ export type Delta =
       importance?: number;
       active?: boolean;
       models?: string[];
+      scope?: Scope;
     }
-  | { op: "delete"; id: string; reason: string };
+  | { op: "delete"; id: string; reason: string; scope?: Scope };
 
 export type DeltaSource = "manual" | "refine" | "migrate";
 

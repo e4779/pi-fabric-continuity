@@ -14,7 +14,7 @@ import {
   type FabricProviderListRequest,
   type FabricProviderRegistration,
 } from "pi-fabric/protocol";
-import { appendDeltas, currentSnapshot, history, journalPath, revertToVersion, validateDelta } from "./journal.js";
+import { appendDeltas, currentSnapshot, history, journalPath, revertToVersion, splitByScope, validateDelta } from "./journal.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
 
 const scopeSchema = { type: "string", enum: ["project", "global"], default: "project" };
@@ -142,11 +142,17 @@ function makeProvider(): FabricProvider {
             if (err) throw new Error(err);
           }
           const source = args.source === "refine" || args.source === "migrate" ? args.source : "manual";
-          const out = await appendDeltas({ scope, cwd, actor, source, deltas });
-          return {
-            applied: out.transitions.map((t) => ({ op: t.delta.op, id: t.target ?? null, version: t.version })),
-            version: out.snapshot.version,
-          };
+          let applied = 0;
+          let version = (await currentSnapshot(scope, cwd)).version;
+          const routed: string[] = [];
+          for (const [targetScope, group] of splitByScope(deltas, scope)) {
+            if (group.length === 0) continue;
+            const out = await appendDeltas({ scope: targetScope, cwd, actor, source, deltas: group });
+            applied += out.transitions.length;
+            if (targetScope === scope) version = out.snapshot.version;
+            routed.push(`${group.length}->${targetScope}`);
+          }
+          return { applied, version, routed };
         }
         default:
           throw new Error(`unknown continuity action: ${actionName}`);

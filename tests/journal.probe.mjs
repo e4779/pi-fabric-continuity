@@ -19,6 +19,17 @@ check("validate: empty content rejected", j.validateDelta({ op: "create", kind: 
 check("validate: delete without reason rejected", j.validateDelta({ op: "delete", id: "c_x" }) !== null);
 check("validate: good create passes", j.validateDelta({ op: "create", kind: "memory", content: "always run rg before cat", evidence: "trajectory turn 3" }) === null);
 
+// 1b) scope validation and routing
+check("validate: global scope accepted", j.validateDelta({ op: "create", kind: "memory", content: "x", evidence: "y", scope: "global" }) === null);
+check("validate: bad scope rejected", j.validateDelta({ op: "create", kind: "memory", content: "x", evidence: "y", scope: "universal" }) !== null);
+const groups = j.splitByScope([
+  { op: "create", kind: "memory", content: "a", evidence: "e" },
+  { op: "create", kind: "memory", content: "b", evidence: "e", scope: "global" },
+  { op: "delete", id: "c_x", reason: "r", scope: "global" },
+], "project");
+check("split: default fills project", groups.get("project").length === 1);
+check("split: explicit global routed", groups.get("global").length === 2);
+
 // 2) create batch
 const created = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
   { op: "create", kind: "prompt", content: "verify edits with targeted probes", evidence: "turn 5 fix" },

@@ -68,14 +68,16 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
           return;
         }
         const snap = await currentSnapshot("project", cwd);
-        const item = snap.items.find((i) => i.id === idPrefix) ?? snap.items.find((i) => i.id.startsWith(idPrefix));
+        const gsnap = await currentSnapshot("global", cwd);
+        const pool = [...snap.items, ...gsnap.items];
+        const item = pool.find((i) => i.id === idPrefix) ?? pool.find((i) => i.id.startsWith(idPrefix));
         if (!item) {
           await ctx.ui.notify(`continuity: no item matching ${idPrefix}`, "warning");
           return;
         }
         const bump = sub === "keep" ? 0.1 : -0.1;
         const importance = Math.round(Math.min(1, Math.max(0, item.importance + bump)) * 100) / 100;
-        await appendDeltas({ scope: "project", cwd, actor: "command:harness", source: "manual", deltas: [{ op: "update", id: item.id, importance }] });
+        await appendDeltas({ scope: item.scope, cwd, actor: "command:harness", source: "manual", deltas: [{ op: "update", id: item.id, importance }] });
         await ctx.ui.notify(`continuity: ${item.id} importance ${item.importance.toFixed(2)} -> ${importance.toFixed(2)}`, "info");
         return;
       }
@@ -95,9 +97,15 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
       }
       if (sub === "list") {
         const snap = await currentSnapshot("project", cwd);
-        const lines = snap.items.map(
-          (i) => `[${i.id}] (${i.kind}, imp ${i.importance.toFixed(2)}${i.active ? "" : ", inactive"}) ${i.content.slice(0, 100)}`,
-        );
+        const gsnap = await currentSnapshot("global", cwd);
+        const lines = [
+          ...snap.items.map(
+            (i) => `[${i.id}] (${i.kind}, imp ${i.importance.toFixed(2)}${i.active ? "" : ", inactive"}) ${i.content.slice(0, 100)}`,
+          ),
+          ...gsnap.items.map(
+            (i) => `[${i.id}] (global, ${i.kind}, imp ${i.importance.toFixed(2)}${i.active ? "" : ", inactive"}) ${i.content.slice(0, 100)}`,
+          ),
+        ];
         await ctx.ui.notify(lines.length ? lines.join("\n") : "continuity: no items yet", "info");
         return;
       }
