@@ -60,6 +60,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   const base = { scope, lookback };
   const cwd = sessionCwdOf(ctx);
 
+  await ctx.ui.notify("continuity refine: proposing (real model call, may take ~30s)…", "info");
   const snap = await currentSnapshot(scope, cwd);
   const branch = (ctx.sessionManager as unknown as { getBranch(): Iterable<unknown> }).getBranch();
   const evidence = gatherEvidence(branch, lookback);
