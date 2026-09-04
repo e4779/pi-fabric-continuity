@@ -39,6 +39,11 @@ export function validateDelta(d: unknown): string | null {
   if (rec.scope !== undefined && rec.scope !== "project" && rec.scope !== "global") {
     return "scope must be project|global";
   }
+  if (rec.op === "move") {
+    if (typeof rec.id !== "string" || !rec.id) return "move.id required";
+    if (rec.to !== "project" && rec.to !== "global") return "move.to must be project|global";
+    return null;
+  }
   if (rec.op === "create") {
     if (!KINDS.includes(rec.kind as ComponentKind)) return "create.kind must be one of prompt|memory|skill|subagent";
     if (typeof rec.content !== "string" || !rec.content.trim()) return "create.content required";
@@ -64,7 +69,8 @@ export function validateDelta(d: unknown): string | null {
  *  ids would be regenerated on every read and updates/deletes would miss. */
 function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, scope: Scope, target?: string): string | null {
   if (delta.op === "create") {
-    const id = target ?? genId();
+    const explicit = target ?? (typeof (delta as { id?: unknown }).id === "string" && (delta as { id?: string }).id ? (delta as { id?: string }).id : undefined);
+    const id = explicit ?? genId();
     items.set(id, {
       id,
       kind: delta.kind,
@@ -100,9 +106,55 @@ export function splitByScope(deltas: Delta[], defaultScope: Scope): Map<Scope, D
     ["global", []],
   ]);
   for (const d of deltas) {
-    out.get(d.scope ?? defaultScope)!.push(d);
+    const scope = (d as { scope?: Scope }).scope ?? defaultScope;
+    out.get(scope)!.push(d);
   }
   return out;
+}
+/** Move an item between scopes: delete from the source journal, recreate with
+ *  the same id in the target journal. Both transitions are journaled. */
+export async function moveItem(opts: {
+  cwd?: string;
+  id: string;
+  to: Scope;
+  actor: string;
+  reason?: string;
+}): Promise<{ from: Scope | null; to: Scope; moved: boolean; item: HarnessItem | null }> {
+  let from: Scope | null = null;
+  let item: HarnessItem | null = null;
+  for (const s of ["project", "global"] as Scope[]) {
+    const snap = await currentSnapshot(s, opts.cwd);
+    const found = snap.items.find((i) => i.id === opts.id);
+    if (found) {
+      from = s;
+      item = found;
+      break;
+    }
+  }
+  if (!from || !item) return { from: null, to: opts.to, moved: false, item: null };
+  if (from === opts.to) return { from, to: opts.to, moved: false, item };
+  await appendDeltas({
+    scope: from,
+    cwd: opts.cwd,
+    actor: opts.actor,
+    source: "manual",
+    deltas: [{ op: "delete", id: opts.id, reason: opts.reason ?? `moved to ${opts.to}` }],
+    note: `move to ${opts.to}`,
+  });
+  const destDeltas: Delta[] = [
+    {
+      op: "create",
+      kind: item.kind,
+      content: item.content,
+      evidence: item.evidence,
+      importance: item.importance,
+      ...(item.models ? { models: item.models } : {}),
+      id: item.id,
+    },
+  ];
+  if (!item.active) destDeltas.push({ op: "update", id: item.id, active: false });
+  await appendDeltas({ scope: opts.to, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas: destDeltas, note: `moved from ${from}` });
+  return { from, to: opts.to, moved: true, item };
 }
 export function sortItems(items: HarnessItem[]): HarnessItem[] {
   return [...items].sort((a, b) => b.importance - a.importance || a.createdAt - b.createdAt);

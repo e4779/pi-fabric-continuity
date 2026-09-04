@@ -103,6 +103,26 @@ check("revert: future version is a no-op", revAgain.transitions.length === 0);
 const globalSnap = await j.currentSnapshot("global", cwd);
 check("scope: global isolated", globalSnap.items.length === 0 && globalSnap.version === 0);
 
+// 9) move op: explicit-id create + cross-journal relocation
+check("validate: move requires to", j.validateDelta({ op: "move", id: "c_x" }) !== null);
+check("validate: good move passes", j.validateDelta({ op: "move", id: "c_x", to: "global" }) === null);
+const fixed = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
+  { op: "create", kind: "prompt", content: "movable", evidence: "e", id: "c_fixed" },
+] });
+check("create: explicit id honored", fixed.snapshot.items.some((i) => i.id === "c_fixed"));
+const refoldFixed = await j.currentSnapshot("project", cwd);
+check("create: explicit id stable across refolds", refoldFixed.items.some((i) => i.id === "c_fixed"));
+const mv = await j.moveItem({ cwd, id: "c_fixed", to: "global", actor: "probe" });
+check("move: reported moved", mv.moved === true && mv.from === "project");
+const afterMoveP = await j.currentSnapshot("project", cwd);
+const afterMoveG = await j.currentSnapshot("global", cwd);
+check("move: gone from source", !afterMoveP.items.some((i) => i.id === "c_fixed"));
+check("move: present in target with same id", afterMoveG.items.some((i) => i.id === "c_fixed" && i.content === "movable"));
+const mvAgain = await j.moveItem({ cwd, id: "c_fixed", to: "global", actor: "probe" });
+check("move: same-scope is a no-op", mvAgain.moved === false);
+const mvMissing = await j.moveItem({ cwd, id: "c_nope", to: "global", actor: "probe" });
+check("move: unknown id reports not moved", mvMissing.moved === false && mvMissing.from === null);
+
 const fails = results.filter((r) => r.startsWith("FAIL")).length;
 console.log(results.join("\n"));
 console.log(`\n${results.length - fails}/${results.length} passed`);

@@ -37,6 +37,8 @@ export type Delta =
       importance?: number;
       models?: string[];
       scope?: Scope;
+      /** Explicit id (moves/migrations); server-generated when omitted. */
+      id?: string;
     }
   | {
       op: "update";
@@ -48,7 +50,8 @@ export type Delta =
       models?: string[];
       scope?: Scope;
     }
-  | { op: "delete"; id: string; reason: string; scope?: Scope };
+  | { op: "delete"; id: string; reason: string; scope?: Scope }
+  | { op: "move"; id: string; to: Scope; reason?: string };
 
 export type DeltaSource = "manual" | "refine" | "migrate";
 

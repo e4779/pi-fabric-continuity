@@ -3,20 +3,20 @@
 // (continuity.mutate) so every change is journaled with an actor.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendDeltas, currentSnapshot, history, revertToVersion } from "./journal.js";
+import { appendDeltas, currentSnapshot, history, moveItem, revertToVersion } from "./journal.js";
 import { runRefine } from "./refine.js";
 import { lastKnownSessionCwd, sessionCwdOf } from "./session-cwd.js";
 
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
-    description: "continuity: status | list | history [n] | refine [lookback] — inspect and refine the harness journal",
+    description: "continuity: status | list | history [n] | refine [lookback] | keep/drop <id> | move <id> <scope> | revert <version>",
     // TUI contract: applyCompletion replaces the ENTIRE argument text with the
     // accepted item's value, so multi-word suggestions must repeat the
     // subcommand in value ("keep <id>", "list <kind>", "revert <version>").
     getArgumentCompletions: (argumentPrefix: string) => {
       const arg = argumentPrefix.trimStart();
       if (!arg.includes(" ")) {
-        const subs = ["status", "list", "history", "refine", "keep", "drop", "revert"]
+        const subs = ["status", "list", "history", "refine", "keep", "drop", "move", "revert"]
           .filter((s) => s.startsWith(arg))
           .map((s) => ({ value: s, label: s }));
         return subs.length > 0 ? subs : null;
@@ -31,16 +31,39 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
         return kinds.length > 0 ? kinds : null;
       }
       if (sub === "keep" || sub === "drop") {
-        return currentSnapshot("project", lastKnownSessionCwd()).then((snap) => {
-          const items = snap.items
-            .filter((i) => i.id.startsWith(rest))
-            .map((i) => ({
-              value: `${sub} ${i.id}`,
-              label: `${i.id} — ${i.content.slice(0, 40)}`,
-              description: i.kind,
-            }));
-          return items.length > 0 ? items : null;
-        });
+        return currentSnapshot("project", lastKnownSessionCwd()).then((snap) =>
+          currentSnapshot("global", lastKnownSessionCwd()).then((gsnap) => {
+            const items = [...snap.items, ...gsnap.items]
+              .filter((i) => i.id.startsWith(rest))
+              .map((i) => ({
+                value: `${sub} ${i.id}`,
+                label: `${i.id} — ${i.content.slice(0, 40)}`,
+                description: i.scope,
+              }));
+            return items.length > 0 ? items : null;
+          }),
+        );
+      }
+      if (sub === "move") {
+        const stage = /^\S+\s+\S*$/.test(rest);
+        if (!stage) {
+          return currentSnapshot("project", lastKnownSessionCwd()).then((snap) =>
+            currentSnapshot("global", lastKnownSessionCwd()).then((gsnap) => {
+              const items = [...snap.items, ...gsnap.items]
+                .filter((i) => i.id.startsWith(rest.trim()))
+                .map((i) => ({
+                  value: `move ${i.id}`,
+                  label: `${i.id} — ${i.content.slice(0, 40)}`,
+                  description: `${i.scope} -> ?`,
+                }));
+              return items.length > 0 ? items : null;
+            }),
+          );
+        }
+        const [idPart, scopePart] = rest.split(/\s+/);
+        const targets = ["global", "project"].filter((s) => s.startsWith(scopePart));
+        const items = targets.map((s) => ({ value: `move ${idPart} ${s}`, label: s }));
+        return items.length > 0 ? items : null;
       }
       if (sub === "revert") {
         return history("project", lastKnownSessionCwd(), 15).then((transitions) => {
@@ -57,6 +80,28 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const sub = parts[0] ?? "status";
       const cwd = sessionCwdOf(ctx);
+      if (sub === "move") {
+        const idPrefix = parts[1] ?? "";
+        const to = parts[2];
+        if (!idPrefix || (to !== "global" && to !== "project")) {
+          await ctx.ui.notify("usage: /harness move <id> global|project", "info");
+          return;
+        }
+        const snap = await currentSnapshot("project", cwd);
+        const gsnap = await currentSnapshot("global", cwd);
+        const pool = [...snap.items, ...gsnap.items];
+        const item = pool.find((i) => i.id === idPrefix) ?? pool.find((i) => i.id.startsWith(idPrefix));
+        if (!item) {
+          await ctx.ui.notify(`continuity: no item matching ${idPrefix}`, "warning");
+          return;
+        }
+        const r = await moveItem({ cwd, id: item.id, to, actor: "command:harness" });
+        await ctx.ui.notify(
+          r.moved ? `continuity: moved ${item.id} ${r.from} -> ${to}` : `continuity: ${item.id} already in ${to}`,
+          "info",
+        );
+        return;
+      }
       if (sub === "refine") {
         await runRefineCommand(pi, ctx, parts.slice(1));
         return;

@@ -36,17 +36,18 @@ check("subcommands: exact 'keep' suggests itself (accept adds the space)", Array
 const snap = await j.currentSnapshot("project");
 const id = snap.items[0].id;
 const keepSpace = await resolve(complete("keep "));
-check("keep: value embeds subcommand", Array.isArray(keepSpace) && keepSpace.length === 1 && keepSpace[0].value === `keep ${id}`, JSON.stringify(keepSpace));
-check("keep: label is id-first with dash", Array.isArray(keepSpace) && /^c_\S+ — /.test(keepSpace[0].label), keepSpace && keepSpace[0] && keepSpace[0].label);
-check("keep: kind in description", Array.isArray(keepSpace) && keepSpace[0].description === "memory");
+const keepEntry = Array.isArray(keepSpace) ? keepSpace.find((i) => i.value === `keep ${id}`) : undefined;
+check("keep: value embeds subcommand", keepEntry !== undefined, JSON.stringify(keepSpace));
+check("keep: label is id-first with dash", keepEntry !== undefined && /^c_\S+ — /.test(keepEntry.label), keepEntry && keepEntry.label);
+check("keep: scope in description", keepEntry !== undefined && keepEntry.description === "project");
 
 // partial id
 const keepPartial = await resolve(complete(`keep ${id.slice(0, 6)}`));
-check("keep: partial id filters, value still full", Array.isArray(keepPartial) && keepPartial.length === 1 && keepPartial[0].value === `keep ${id}`);
+check("keep: partial id filters, value still full", Array.isArray(keepPartial) && keepPartial.some((i) => i.value === `keep ${id}`));
 
 // drop same path
 const dropSpace = await resolve(complete("drop "));
-check("drop: same suggestions", Array.isArray(dropSpace) && dropSpace.length === 1 && dropSpace[0].value === `drop ${id}`);
+check("drop: same suggestions", Array.isArray(dropSpace) && dropSpace.some((i) => i.value === `drop ${id}`));
 
 // list kinds embed subcommand
 const listSpace = await resolve(complete("list "));

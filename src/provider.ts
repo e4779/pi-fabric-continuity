@@ -14,7 +14,7 @@ import {
   type FabricProviderListRequest,
   type FabricProviderRegistration,
 } from "pi-fabric/protocol";
-import { appendDeltas, currentSnapshot, history, journalPath, revertToVersion, splitByScope, validateDelta } from "./journal.js";
+import { appendDeltas, currentSnapshot, history, journalPath, moveItem, revertToVersion, splitByScope, validateDelta } from "./journal.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
 
 const scopeSchema = { type: "string", enum: ["project", "global"], default: "project" };
@@ -59,7 +59,7 @@ function descriptors(): FabricActionDescriptor[] {
     },
     {
       name: "mutate",
-      description: "Apply a batch of structured CRUD deltas (create/update/delete) to the harness journal. Atomic: the whole batch is validated before anything is appended. Evidence required on create; reason required on delete.",
+      description: "Apply a batch of structured deltas (create/update/delete/move) to the harness journals. Atomic validation; evidence on create; reason on delete; move relocates an item between scopes preserving its id.",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -142,17 +142,25 @@ function makeProvider(): FabricProvider {
             if (err) throw new Error(err);
           }
           const source = args.source === "refine" || args.source === "migrate" ? args.source : "manual";
+          const moves = deltas.filter((d) => (d as { op?: string }).op === "move");
+          const rest = deltas.filter((d) => (d as { op?: string }).op !== "move");
+          const moved = [] as Array<{ id: string; from: string | null; to: string; moved: boolean }>;
+          for (const m of moves) {
+            const mv = m as { id: string; to: Scope };
+            const r = await moveItem({ cwd, id: mv.id, to: mv.to, actor });
+            moved.push({ id: mv.id, from: r.from, to: mv.to, moved: r.moved });
+          }
           let applied = 0;
           let version = (await currentSnapshot(scope, cwd)).version;
           const routed: string[] = [];
-          for (const [targetScope, group] of splitByScope(deltas, scope)) {
+          for (const [targetScope, group] of splitByScope(rest, scope)) {
             if (group.length === 0) continue;
             const out = await appendDeltas({ scope: targetScope, cwd, actor, source, deltas: group });
             applied += out.transitions.length;
             if (targetScope === scope) version = out.snapshot.version;
             routed.push(`${group.length}->${targetScope}`);
           }
-          return { applied, version, routed };
+          return { applied, version, routed, moved };
         }
         default:
           throw new Error(`unknown continuity action: ${actionName}`);
