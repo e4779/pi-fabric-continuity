@@ -48,6 +48,25 @@ Auto-refine cadence (opt-in):
 { "autoRefine": { "enabled": true, "everyTurns": 50 } }
 ```
 
+## The daily loop
+
+Three roles, one journal:
+
+1. **Refine** — every N turns (opt-in `autoRefine`) or on demand (`/harness refine`),
+   the pipeline reads the recent trajectory and proposes evidence-backed deltas.
+   Repeated patterns, durable facts, and stale items become journal transitions.
+2. **The model self-corrects** — active items are injected into the system prompt
+   each turn (importance-ordered, token-budgeted). When the model notices an item
+   is wrong or stale mid-session, it updates it directly via `continuity.mutate`
+   from any fabric_exec program — no waiting for the human.
+3. **You curate** — `/harness keep`/`drop` to steer importance, `/harness history`
+   to audit who changed what and why, `/harness revert <v>` to undo a bad refine.
+   Every mutation is journaled; nothing happens outside the audit trail.
+
+Scopes: `project` per working directory (default), `global` for cross-project
+principles (via the provider's `scope: "global"`).
+
+
 ## Storage
 
 Provider-owned append-only journals, one authority, snapshots derived by folding:
