@@ -1,4 +1,4 @@
-# pi-harness-state (working title)
+# pi-fabric-continuity
 
 Self-improving harness notes & principles for [pi](https://github.com/earendil-works/pi-coding-agent),
 built on **pi-fabric** primitives. Successor to the pi-continual-harness concept,
@@ -52,5 +52,8 @@ derivable from the journal alone; rewind/fork/resume must not lie.
 
 ## Status
 
-Design agreed 2026-09-04. Nothing implemented yet — session forked into this
-directory to continue.
+Design agreed 2026-09-04; decisions applied 2026-09-04: scope-based binding
+(project default, global opt-in, optional models[] hint — no per-model ownership);
+runner-agnostic refine pipeline (inline default for manual, durable for cadence);
+name `pi-fabric-continuity`; one-shot migration recipe instead of an importer.
+Nothing implemented yet.

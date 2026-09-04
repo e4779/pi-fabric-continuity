@@ -48,9 +48,9 @@ Mesh state lives **outside** the session tree: /tree rewind does not roll harnes
 4. Background refine survives session close; results appear next turn.
 5. Injection respects the token budget.
 
-## Open questions
+## Decisions (2026-09-04)
 
-1. Model binding: strict per-model (continual-harness) vs scope-only + optional model tag (prime-agent)?
-2. Refine in-turn vs background-first? (proposal: background-first)
-3. Name: keep `pi-harness-state`?
-4. Migration importer from continual-harness session entries / md file?
+1. **No per-model ownership.** Scopes only: `project` (default) and `global` (opt-in). Optional `models?: string[]` hint on an item for relevance filtering — never ownership, never blank-slate resets.
+2. **Runner-agnostic refine pipeline.** One propose→transition path; runners: `inline` (default for manual `/harness refine`, runs at turn end like prime-agent) and `durable` one-shot (cadence/event triggers, survives session close).
+3. **Name: pi-fabric-continuity** (directory renamed; old path symlinked for the current session).
+4. **No importer feature.** One-shot migration recipe documented: an agent reads the old `harness-state.md` / session entries and emits create-transitions.
