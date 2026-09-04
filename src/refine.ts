@@ -47,10 +47,12 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   const branch = (ctx.sessionManager as unknown as { getBranch(): Iterable<unknown> }).getBranch();
   const evidence = gatherEvidence(branch, lookback);
   if (!evidence.trim()) {
+    await ctx.ui.notify("continuity refine: skipped — no trajectory evidence found", "info");
     return { ...base, evidenceBytes: 0, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no trajectory evidence" };
   }
   const model = (ctx as unknown as { model?: AnyModel }).model;
   if (!model) {
+    await ctx.ui.notify("continuity refine: skipped — no active model", "info");
     return { ...base, evidenceBytes: evidence.length, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no active model" };
   }
 

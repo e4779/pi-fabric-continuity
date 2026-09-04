@@ -62,6 +62,22 @@ export function parseProposerOutput(text: string): { summary: string; deltas: un
   }
 }
 
+/** Extract the speaker role from a session entry.
+ *  Real pi session entries are { type: "message", message: { role, content } };
+ *  the bare { type: "user"|"assistant", content } shape is tolerated too. */
+function roleOf(rec: Record<string, unknown>): "user" | "assistant" | undefined {
+  const msg = rec.message as Record<string, unknown> | undefined;
+  if (msg && typeof msg.role === "string") {
+    return msg.role === "user" || msg.role === "assistant" ? msg.role : undefined;
+  }
+  return rec.type === "user" || rec.type === "assistant" ? rec.type : undefined;
+}
+
+function contentOf(rec: Record<string, unknown>): unknown {
+  const msg = rec.message as Record<string, unknown> | undefined;
+  return msg && msg.content !== undefined ? msg.content : rec.content;
+}
+
 /** Render recent trajectory evidence from a session branch (user/assistant text only). */
 export function gatherEvidence(
   branch: Iterable<unknown>,
@@ -71,11 +87,12 @@ export function gatherEvidence(
   const lines: string[] = [];
   for (const entry of branch) {
     const rec = entry as Record<string, unknown>;
-    if (rec.type !== "user" && rec.type !== "assistant") continue;
-    const text = textOf(rec.content);
+    const role = roleOf(rec);
+    if (!role) continue;
+    const text = textOf(contentOf(rec));
     if (!text) continue;
     const capped = text.length > PER_ENTRY_CHAR_CAP ? text.slice(0, PER_ENTRY_CHAR_CAP) + " …" : text;
-    lines.push(`${rec.type}: ${capped}`);
+    lines.push(`${role}: ${capped}`);
   }
   const tail = lines.slice(-lookback * 2);
   let out = tail.join("\n");

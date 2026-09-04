@@ -40,6 +40,15 @@ check("evidence: lookback tail", !short.includes("first message") && short.inclu
 const capped = c.gatherEvidence([{ type: "user", content: "x".repeat(50000) }], 25, 100);
 check("evidence: byte cap keeps tail", capped.length <= 110 && capped.startsWith("…"));
 
+// real pi session shape: { type: "message", message: { role, content } }
+const wrappedBranch = [
+  { type: "message", message: { role: "user", content: [{ type: "text", text: "wrapped user" }] } },
+  { type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "hidden thought" }, { type: "text", text: "wrapped answer" }] } },
+  { type: "message", message: { role: "toolResult", content: [{ type: "text", text: "tool out" }] } },
+];
+const wev = c.gatherEvidence(wrappedBranch, 25, 16000);
+check("evidence: wrapped message entries", wev.includes("user: wrapped user") && wev.includes("assistant: wrapped answer") && !wev.includes("tool out") && !wev.includes("hidden thought"));
+
 // evaluateCadence
 const auto = { enabled: true, everyTurns: 10 };
 check("cadence: first sighting seeds baseline", c.evaluateCadence(auto, 5, -1).fire === false);

@@ -15,7 +15,11 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
       const cwd = process.cwd();
       if (sub === "refine") {
         const lookback = Number(parts[1]) > 0 ? Number(parts[1]) : undefined;
-        await runRefine(pi, ctx, { lookback });
+        try {
+          await runRefine(pi, ctx, { lookback });
+        } catch (err) {
+          await ctx.ui.notify(`continuity refine failed: ${String(err)}`, "warning");
+        }
         return;
       }
       if (sub === "list") {
