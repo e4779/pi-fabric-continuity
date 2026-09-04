@@ -81,7 +81,11 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     system: PROPOSER_SYSTEM,
     messages: [{ role: "user", content: [{ type: "text", text: buildUserText(snap.items, evidence, opts.instructions) }] }],
   } as unknown as AnyContext;
-  const msg = (await completeSimple(model, context)) as unknown as { content: unknown };
+  const msg = (await completeSimple(model, context, {
+    // Keep the proposer lean: minimal reasoning, bounded output.
+    reasoning: "minimal",
+    maxTokens: 4096,
+  })) as unknown as { content: unknown; stopReason?: unknown; error?: unknown; usage?: unknown; responseModel?: unknown };
   const replyText = textOf(msg.content).trim();
   const parsed = parseProposerOutput(replyText);
   const deltas = (parsed?.deltas ?? []).filter((d): d is Delta => validateDelta(d) === null);
@@ -97,6 +101,11 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     evidenceChars: evidence.length,
     replyChars: replyText.length,
     reply: replyText.slice(0, 4000),
+    stopReason: typeof msg.stopReason === "string" ? msg.stopReason : null,
+    error: msg.error === undefined ? null : String(msg.error).slice(0, 500),
+    responseModel: typeof msg.responseModel === "string" ? msg.responseModel : null,
+    usage: msg.usage === undefined ? null : msg.usage,
+    msgKeys: Object.keys(msg),
     parsedOk: parsed !== null,
     proposedCount: parsed?.deltas.length ?? 0,
     appliedCount: deltas.length,
@@ -118,9 +127,12 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     });
   }
   const unparseable = replyText.length > 0 && parsed === null;
-  const summary = unparseable
-    ? "proposer output unparseable — no deltas applied"
-    : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
+  const empty = replyText.length === 0;
+  const summary = empty
+    ? "proposer returned an empty reply (model produced no text)"
+    : unparseable
+      ? "proposer output unparseable — no deltas applied"
+      : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
   await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s), journal v${version})`, "info");
   return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version };
 }
