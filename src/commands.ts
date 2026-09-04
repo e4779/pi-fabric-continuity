@@ -9,6 +9,23 @@ import { runRefine } from "./refine.js";
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
     description: "continuity: status | list | history [n] | refine [lookback] — inspect and refine the harness journal",
+    getArgumentCompletions: (argumentPrefix: string) => {
+      const prefix = argumentPrefix.trimStart();
+      if (!prefix.includes(" ")) {
+        const subs = ["status", "list", "history", "refine"]
+          .filter((s) => s.startsWith(prefix))
+          .map((s) => ({ value: s, label: s }));
+        return subs.length > 0 ? subs : null;
+      }
+      if (prefix.startsWith("list")) {
+        const kindPrefix = prefix.slice(4).trimStart();
+        const kinds = ["prompt", "memory", "skill", "subagent"]
+          .filter((k) => k.startsWith(kindPrefix))
+          .map((k) => ({ value: k, label: k }));
+        return kinds.length > 0 ? kinds : null;
+      }
+      return null;
+    },
     handler: async (args: string, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const sub = parts[0] ?? "status";
