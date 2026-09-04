@@ -1,80 +1,81 @@
 # pi-fabric-continuity
 
-Self-improving harness notes & principles for [pi](https://github.com/earendil-works/pi-coding-agent),
-built on **pi-fabric** primitives. Successor to the pi-continual-harness concept,
-re-architected per The Harness Playbook.
+Continual harness for [pi](https://github.com/earendil-works/pi-coding-agent), built on
+[pi-fabric](https://github.com/monotykamary/pi-fabric) primitives: self-improving prompt
+notes, principles, skill descriptions, and sub-agent specs — with a refine loop and
+**no manual import/export** of a durable file.
 
-## Goal
+Successor to the pi-continual-harness concept, re-architected per
+[The Harness Playbook](https://stencil.so/blog/harness-playbook): one authority
+(an append-only journal), state derived by folding, /tree-correct trajectory reads.
 
-One extension over fabric that manages evolving prompt notes, declared principles,
-skill descriptions, and sub-agent specs — with a refine loop and **no manual
-import/export** of a durable file.
+## Install
 
-## Why (design constraints)
+Requires pi >= 0.85 with the pi-fabric extension installed.
 
-pi-continual-harness has two authorities (session entries + `harness-state.md`)
-and a manual `/harness import|export` reconciliation — exactly the "two
-authorities" failure mode The Harness Playbook criticizes. State must be
-derivable from the journal alone; rewind/fork/resume must not lie.
+```bash
+pi install git:github.com/e4779/pi-fabric-continuity
+```
 
-## Architecture (v1, agreed)
+Or drop a symlink into `~/.pi/agent/extensions/` for development:
 
-- **Authority → mesh state.** Harness state lives as a CAS key
-  (`state/current`-style) with an append-only transition topic. One source of
-  truth; new sessions just read it. Conflicts resolved by CAS versioning, not
-  by manual merge policy.
-- **Trajectory source → `memory.*`.** Refine reads recent turns via
-  `memory.recall`/`memory.walk` (active branches, scopes: session / project /
-  global). Respects `/tree` navigation by construction.
-- **Refine → fabric_exec program.** Proposes structured CRUD deltas →
-  `state.transition` with evidence attached (ACE-style itemized deltas, never
-  prose rewrites).
-- **Adaptive → durable background agent.** Event-triggered refine
-  (`state.violated`, failed `checkGoal`, every N turns) as a durable one-shot;
-  the live session picks up changes next turn without spending context.
-- **Thin pi extension layer.** Only prompt-injection hooks and slash commands;
-  all logic lives on fabric primitives.
-- **pi-reflect compat.** Markdown export becomes a one-way projection (view),
-  never a second authority. Offline results are applied back as transitions.
+```bash
+ln -s ~/src/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuity
+```
 
-## References
+## Usage
 
-- Base concept: `~/.pi/agent/npm/node_modules/pi-continual-harness/` (src,
-  `/refine` semantics, harness-state store)
-- Fabric docs: `~/.pi/agent/npm/node_modules/pi-fabric/docs/` — `state-layer.md`,
-  `memory-recall.md`, `residency-runtime.md`, `agents.md`, `architecture.md`
-- Playbook: `~/kn/_sources/agents/stencil-harness-playbook.md` (+ distilled
-  concept `~/kn/bundles/agents/harness-architecture-playbook.md`)
-- prime-agent / RLM: `~/kn/bundles/agents/prime-agent.md`, `rlm-paradigm.md`
-- Related: pi-reflect (jo-inc/pi-reflect), pi-mem; monotykamary's
-  pi-reason-harness reviewed and rejected (different domain: test-time
-  strategy ensembling, ARC-AGI oriented)
+```
+/harness status            # journal versions + item counts (project & global)
+/harness list [kind]       # items, optionally filtered by prompt|memory|skill|subagent
+/harness history [n]       # recent journal transitions (who/when/why)
+/harness refine [lookback] # trajectory evidence -> LLM proposer -> journaled deltas
+/harness keep|drop <id>    # importance hygiene (+/-0.1, as transitions)
+/harness revert <version>  # compensating deltas; the journal is never rewritten
+```
 
-## Status
+All subcommands, kinds, item ids, and journal versions autocomplete.
 
-Design agreed 2026-09-04; decisions applied 2026-09-04: scope-based binding
-(project default, global opt-in, optional models[] hint — no per-model ownership);
-runner-agnostic refine pipeline (inline default for manual, durable for cadence);
-name `pi-fabric-continuity`; one-shot migration recipe instead of an importer.
-- **v0 skeleton implemented** (typecheck clean, 19/19 journal probes green):
-  provider-owned journal (append-only, atomic batches, corrupt-line tolerant,
-  stable ids across folds), `continuity` FabricProvider (status/list/read/
-  history/mutate), before_agent_start injection (token-budgeted), `/harness`
-  status|list|history. Probes: `tsc -p tsconfig.build.json &&
-  HOME=/tmp/fakehome node tests/journal.probe.mjs`.
-- **Refine pipeline implemented** (d9d1d72): /harness refine [lookback] —
-  trajectory evidence (ctx.sessionManager branch, text blocks only, byte-capped)
-  → completeSimple proposer (ACE rules, strict JSON) → validated deltas →
-  journal (source "refine", actor model:provider/id) + session audit entry.
-  turn_end cadence behind ~/.pi/agent/continuity/config.json
-  {"autoRefine":{"enabled":true,"everyTurns":50}}. Probes: 19/19 refine-core,
-  19/19 journal.
-- **Hygiene commands implemented** (671566d): /harness keep|drop (importance
-  as journaled transitions), /harness revert <version> (compensating deltas,
-  append-only — history is never rewritten), dynamic argument completions
-  (subcommands, kinds, item ids, journal versions). Probes: 24/24 journal,
-  20/20 refine-core.
-- Durable-runner and migration recipes: [docs/durable-recipe.md](docs/durable-recipe.md).
-- v1 surface complete. Live-verified: provider calls from fabric_exec, journal
-  persistence, /harness refine end-to-end. Recipe-stage (verify on first use):
-  durable cadence, migration import.
+The same surface is a first-class fabric provider: any `fabric_exec` program
+(including spawned durable agents) can call
+`tools.call({ ref: "continuity.mutate", args: { deltas: [...] } })` with
+fabric-side validation, risk policy, and nested-call audit.
+
+Auto-refine cadence (opt-in):
+
+```json
+// ~/.pi/agent/continuity/config.json
+{ "autoRefine": { "enabled": true, "everyTurns": 50 } }
+```
+
+## Storage
+
+Provider-owned append-only journals, one authority, snapshots derived by folding:
+
+```
+~/.pi/agent/continuity/global/journal.jsonl
+~/.pi/agent/continuity/projects/<slug>/journal.jsonl
+```
+
+Scopes: `project` (default, slug from cwd) and `global`. Items carry an optional
+`models` hint for relevance — never ownership, never blank-slate resets.
+
+## Design
+
+- [docs/requirements.md](docs/requirements.md) — goals, decisions, storage mapping,
+  acceptance criteria
+- [docs/domain-map.md](docs/domain-map.md) — survey of pi-continual-harness,
+  prime-agent refinement, pi-reflect, pi-mem
+- [docs/durable-recipe.md](docs/durable-recipe.md) — durable background refine
+  and migration recipes
+
+Probes (no framework needed):
+
+```bash
+npm run -s typecheck || npx tsc --noEmit -p tsconfig.json
+tsc -p tsconfig.build.json && HOME=/tmp/fakehome node tests/journal.probe.mjs && HOME=/tmp/fakehome node tests/refine.probe.mjs
+```
+
+## License
+
+[BSD-2-Clause](LICENSE) — the OpenBSD-style license.

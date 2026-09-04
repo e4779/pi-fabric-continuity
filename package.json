@@ -5,7 +5,12 @@
   "type": "module",
   "main": "./src/index.ts",
   "keywords": ["pi-extension", "pi-package", "pi-fabric", "continual-harness", "self-improvement"],
-  "license": "MIT",
+  "license": "BSD-2-Clause",
+  "author": "e4779",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/e4779/pi-fabric-continuity.git"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
