@@ -10,6 +10,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerHarnessCommand } from "./commands.js";
 import { registerInjection } from "./inject.js";
 import { currentSnapshot } from "./journal.js";
+import { sessionCwdOf } from "./session-cwd.js";
 import { registerAutoRefine, resetCadence } from "./refine.js";
 import { registerContinuityProvider } from "./provider.js";
 
@@ -17,7 +18,7 @@ export default function piFabricContinuity(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     resetCadence();
     try {
-      const snap = await currentSnapshot("project", process.cwd());
+      const snap = await currentSnapshot("project", sessionCwdOf(ctx));
       if (snap.items.length > 0) {
         ctx.ui.notify(`continuity: ${snap.items.length} harness item(s) restored (journal v${snap.version})`, "info");
       }

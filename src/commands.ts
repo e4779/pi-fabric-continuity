@@ -5,6 +5,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendDeltas, currentSnapshot, history, revertToVersion } from "./journal.js";
 import { runRefine } from "./refine.js";
+import { lastKnownSessionCwd, sessionCwdOf } from "./session-cwd.js";
 
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
@@ -30,7 +31,7 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
         return kinds.length > 0 ? kinds : null;
       }
       if (sub === "keep" || sub === "drop") {
-        return currentSnapshot("project", process.cwd()).then((snap) => {
+        return currentSnapshot("project", lastKnownSessionCwd()).then((snap) => {
           const items = snap.items
             .filter((i) => i.id.startsWith(rest))
             .map((i) => ({
@@ -42,7 +43,7 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
         });
       }
       if (sub === "revert") {
-        return history("project", process.cwd(), 15).then((transitions) => {
+        return history("project", lastKnownSessionCwd(), 15).then((transitions) => {
           const versions = transitions
             .map((t) => String(t.version))
             .filter((v) => v.startsWith(rest))
@@ -55,7 +56,7 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
     handler: async (args: string, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const sub = parts[0] ?? "status";
-      const cwd = process.cwd();
+      const cwd = sessionCwdOf(ctx);
       if (sub === "refine") {
         await runRefineCommand(pi, ctx, parts.slice(1));
         return;

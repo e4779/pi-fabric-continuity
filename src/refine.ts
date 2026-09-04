@@ -15,6 +15,7 @@ import {
   textOf,
 } from "./refine-core.js";
 import { appendDeltas, currentSnapshot, validateDelta } from "./journal.js";
+import { sessionCwdOf } from "./session-cwd.js";
 import type { Delta, Scope } from "./types.js";
 
 export interface RefineOptions {
@@ -44,8 +45,9 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   const scope = opts.scope ?? "project";
   const lookback = opts.lookback ?? DEFAULT_LOOKBACK_TURNS;
   const base = { scope, lookback };
+  const cwd = sessionCwdOf(ctx);
 
-  const snap = await currentSnapshot(scope);
+  const snap = await currentSnapshot(scope, cwd);
   const branch = (ctx.sessionManager as unknown as { getBranch(): Iterable<unknown> }).getBranch();
   const evidence = gatherEvidence(branch, lookback);
   if (!evidence.trim()) {
@@ -70,7 +72,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   let version = snap.version;
   if (deltas.length > 0) {
     const actor = `model:${(model as unknown as { provider: string; id: string }).provider}/${(model as unknown as { provider: string; id: string }).id}`;
-    const out = await appendDeltas({ scope, actor, source: "refine", deltas });
+    const out = await appendDeltas({ scope, cwd, actor, source: "refine", deltas });
     applied = out.transitions.length;
     version = out.snapshot.version;
     pi.appendEntry("continuity-refinement", {
@@ -81,7 +83,11 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       ts: Date.now(),
     });
   }
-  const summary = parsed?.summary || (applied === 0 ? "no changes warranted" : "");
+  const replyText = textOf(msg.content).trim();
+  const unparseable = replyText.length > 0 && parsed === null;
+  const summary = unparseable
+    ? "proposer output unparseable — no deltas applied"
+    : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
   await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s), journal v${version})`, "info");
   return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version };
 }

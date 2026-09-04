@@ -23,6 +23,7 @@ Rules (ACE-style, strictly):
 - Prefer updating an existing item over creating a near-duplicate; delete only with a concrete reason (stale, wrong, superseded).
 - importance in [0,1] estimates future usefulness; keep nudges small.
 - If nothing is clearly warranted, return an empty deltas array.
+- "Operator instructions" in the user message come from the human operator: when they ask to record or change something, do it via deltas unless it clearly contradicts the evidence.
 
 Respond with STRICT JSON only: {"summary":"one line","deltas":[...]}`;
 
