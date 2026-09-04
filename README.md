@@ -20,7 +20,7 @@ pi install git:github.com/e4779/pi-fabric-continuity
 Or drop a symlink into `~/.pi/agent/extensions/` for development:
 
 ```bash
-ln -s ~/src/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuity
+ln -s ~/projects/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuity
 ```
 
 ## Usage
