@@ -9,26 +9,35 @@ import { runRefine } from "./refine.js";
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
     description: "continuity: status | list | history [n] | refine [lookback] — inspect and refine the harness journal",
+    // TUI contract: applyCompletion replaces the ENTIRE argument text with the
+    // accepted item's value, so multi-word suggestions must repeat the
+    // subcommand in value ("keep <id>", "list <kind>", "revert <version>").
     getArgumentCompletions: (argumentPrefix: string) => {
-      const prefix = argumentPrefix.trimStart();
-      if (!prefix.includes(" ")) {
+      const arg = argumentPrefix.trimStart();
+      if (!arg.includes(" ")) {
         const subs = ["status", "list", "history", "refine", "keep", "drop", "revert"]
-          .filter((s) => s.startsWith(prefix))
+          .filter((s) => s.startsWith(arg))
           .map((s) => ({ value: s, label: s }));
         return subs.length > 0 ? subs : null;
       }
-      const [sub, rest] = [prefix.slice(0, prefix.indexOf(" ")), prefix.slice(prefix.indexOf(" ") + 1).trimStart()];
+      const spaceAt = arg.indexOf(" ");
+      const sub = arg.slice(0, spaceAt);
+      const rest = arg.slice(spaceAt + 1).trimStart();
       if (sub === "list") {
         const kinds = ["prompt", "memory", "skill", "subagent"]
           .filter((k) => k.startsWith(rest))
-          .map((k) => ({ value: k, label: k }));
+          .map((k) => ({ value: `list ${k}`, label: k }));
         return kinds.length > 0 ? kinds : null;
       }
       if (sub === "keep" || sub === "drop") {
         return currentSnapshot("project", process.cwd()).then((snap) => {
           const items = snap.items
             .filter((i) => i.id.startsWith(rest))
-            .map((i) => ({ value: i.id, label: `${i.kind}: ${i.content.slice(0, 48)}` }));
+            .map((i) => ({
+              value: `${sub} ${i.id}`,
+              label: `${i.id} — ${i.content.slice(0, 40)}`,
+              description: i.kind,
+            }));
           return items.length > 0 ? items : null;
         });
       }
@@ -37,7 +46,7 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
           const versions = transitions
             .map((t) => String(t.version))
             .filter((v) => v.startsWith(rest))
-            .map((v) => ({ value: v, label: `v${v}` }));
+            .map((v) => ({ value: `revert ${v}`, label: `v${v}` }));
           return versions.length > 0 ? versions : null;
         });
       }
