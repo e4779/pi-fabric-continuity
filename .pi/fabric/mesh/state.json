@@ -29,11 +29,11 @@
           "sessionId": "01a06cf7-b523-715e-8cf2-916753e3f492"
         },
         "startedAt": 1788536739127,
-        "updatedAt": 1788536857537,
-        "expiresAt": 1788536872537
+        "updatedAt": 1788537370807,
+        "expiresAt": 1788537385807
       },
-      "version": 43,
-      "updatedAt": 1788536857539,
+      "version": 188,
+      "updatedAt": 1788537370808,
       "updatedBy": {
         "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
@@ -56,12 +56,12 @@
         "model": "zai/glm-5.3",
         "thinking": "high",
         "startedAt": 1788536739127,
-        "updatedAt": 1788536857537,
+        "updatedAt": 1788537370807,
         "pendingMessages": false,
         "local": false
       },
-      "version": 43,
-      "updatedAt": 1788536857540,
+      "version": 188,
+      "updatedAt": 1788537370809,
       "updatedBy": {
         "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
@@ -92,13 +92,13 @@
         "model": "zai/glm-5.3",
         "thinking": "high",
         "startedAt": 1788536739127,
-        "updatedAt": 1788536857537,
+        "updatedAt": 1788537370807,
         "pendingMessages": false,
         "controlProtocol": "v1",
         "label": "PFC-2"
       },
-      "version": 43,
-      "updatedAt": 1788536857542,
+      "version": 188,
+      "updatedAt": 1788537370811,
       "updatedBy": {
         "id": "session:01a06cf7-b523-715e-8cf2-916753e3f492",
         "name": "main",
@@ -112,9 +112,9 @@
     "topology/hosts/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 170,
     "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1": 169,
     "topology/participants/8d7267dd4e725528ee0077d39824110369fbb185f64dbe431a51e21dfbbbbd5b": 170,
-    "topology/hosts/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": 43,
-    "sessions/01a06cf7-b523-715e-8cf2-916753e3f492": 43,
-    "topology/participants/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": 43
+    "topology/hosts/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": 188,
+    "sessions/01a06cf7-b523-715e-8cf2-916753e3f492": 188,
+    "topology/participants/5b7c04dd3f960d77df86f3127028f7ac88c8b213cdbd8dde6535ad7d77753204": 188
   },
   "tombstoneOrder": [
     "sessions/01a06ceb-6e88-748b-aa0e-3885c76d35b1",

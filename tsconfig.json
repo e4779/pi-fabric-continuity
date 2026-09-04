@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "types": [],
+    "typeRoots": ["/home/e41q/.pi/agent/npm/node_modules/@types"],
+    "paths": {
+      "@earendil-works/pi-coding-agent": ["/home/e41q/.nvm/versions/node/v24.13.1/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"],
+      "@earendil-works/pi-ai": ["/home/e41q/.pi/agent/npm/node_modules/@earendil-works/pi-ai/dist/index.d.ts"],
+      "pi-fabric/protocol": ["/home/e41q/.pi/agent/npm/node_modules/pi-fabric/dist/protocol.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

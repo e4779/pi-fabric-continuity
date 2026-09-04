@@ -1,0 +1,16 @@
+{
+  "name": "pi-fabric-continuity",
+  "version": "0.1.0",
+  "description": "Continual harness for pi on fabric primitives: provider-owned journal of self-improving notes/principles, exposed as the `continuity` FabricProvider and callable from fabric_exec.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "keywords": ["pi-extension", "pi-package", "pi-fabric", "continual-harness", "self-improvement"],
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.85.0",
+    "pi-fabric": ">=0.82.0"
+  }
+}
