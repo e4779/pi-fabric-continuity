@@ -123,6 +123,29 @@ check("move: same-scope is a no-op", mvAgain.moved === false);
 const mvMissing = await j.moveItem({ cwd, id: "c_nope", to: "global", actor: "probe" });
 check("move: unknown id reports not moved", mvMissing.moved === false && mvMissing.from === null);
 
+// 10) inter-process write serialization: two child processes, one journal
+{
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const runP = promisify(execFile);
+  const script =
+    `const j = await import(${JSON.stringify(found)});` +
+    `for (let i = 0; i < 10; i++) {` +
+    ` await j.appendDeltas({ scope: "project", cwd: ${JSON.stringify(cwd)}, actor: "proc", source: "manual", deltas: [{ op: "create", kind: "memory", content: "conc-" + process.pid + "-" + i, evidence: "e" }] });` +
+    `}` +
+    `console.log("ok");`;
+  const both = await Promise.allSettled([
+    runP("node", ["--input-type=module", "-e", script]),
+    runP("node", ["--input-type=module", "-e", script]),
+  ]);
+  check("lock: both concurrent writers finish", both.every((r) => r.status === "fulfilled" && String(r.value.stdout).includes("ok")));
+  const all = await j.readTransitions(j.journalPath("project", cwd));
+  const versions = all.map((t) => t.version);
+  check("lock: no duplicate versions under contention", new Set(versions).size === versions.length, `versions: ${versions.length}, unique: ${new Set(versions).size}`);
+  const concSnap = await j.currentSnapshot("project", cwd);
+  check("lock: all 20 concurrent creates present", concSnap.items.filter((i) => i.content.startsWith("conc-")).length === 20);
+}
+
 const fails = results.filter((r) => r.startsWith("FAIL")).length;
 console.log(results.join("\n"));
 console.log(`\n${results.length - fails}/${results.length} passed`);

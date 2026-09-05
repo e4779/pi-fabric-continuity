@@ -3,7 +3,7 @@
 // Storage layout: ~/.pi/agent/continuity/global/journal.jsonl and
 // ~/.pi/agent/continuity/projects/<slug>/journal.jsonl (slug from cwd).
 
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";
@@ -197,20 +197,58 @@ export interface AppendOutcome {
   snapshot: JournalSnapshot;
 }
 
-/** Atomic batch append: every delta is validated before anything is written. */
-export async function appendDeltas(opts: {
+/** Inter-process writer lock: exclusive-create with stale takeover.
+ *  Serializes read-version + append across pi sessions sharing one journal. */
+async function withJournalLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = path + ".lock";
+  const deadline = Date.now() + 10000;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  while (handle === undefined) {
+    try {
+      handle = await open(lockPath, "wx");
+    } catch (e) {
+      const err = e as { code?: string };
+      if (err.code !== "EEXIST") throw e;
+      try {
+        const st = await stat(lockPath);
+        if (Date.now() - st.mtimeMs > 10000) await unlink(lockPath); // stale takeover
+      } catch {
+        /* lock vanished — retry immediately */
+      }
+      if (Date.now() > deadline) throw new Error(`journal lock timeout: ${lockPath}`);
+      await new Promise((r) => setTimeout(r, 25 + Math.random() * 50));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    await handle.close();
+    await unlink(lockPath).catch(() => {});
+  }
+}
+
+export interface AppendOptions {
   scope: Scope;
   cwd?: string;
   actor: string;
   source: Transition["source"];
   deltas: Delta[];
   note?: string;
-}): Promise<AppendOutcome> {
+}
+
+/** Atomic batch append: every delta is validated before anything is written.
+ *  Writers are serialized per journal (inter-process lock), so concurrent pi
+ *  sessions in one directory cannot collide on versions. */
+export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> {
   for (const d of opts.deltas) {
     const err = validateDelta(d);
     if (err) throw new Error(err);
   }
   const path = journalPath(opts.scope, opts.cwd);
+  return withJournalLock(path, () => appendDeltasLocked(opts, path));
+}
+
+async function appendDeltasLocked(opts: AppendOptions, path: string): Promise<AppendOutcome> {
   const existing = await readTransitions(path);
   let version = existing.reduce((m, t) => Math.max(m, t.version), 0);
   const items = new Map<string, HarnessItem>();
@@ -249,59 +287,57 @@ export async function revertToVersion(opts: {
   actor: string;
 }): Promise<AppendOutcome> {
   const path = journalPath(opts.scope, opts.cwd);
-  const transitions = await readTransitions(path);
-  const latest = transitions.reduce((m, t) => Math.max(m, t.version), 0);
-  const targetVersion = Math.min(Math.max(0, Math.floor(opts.version)), latest);
-  if (targetVersion >= latest) {
-    const snap = await currentSnapshot(opts.scope, opts.cwd);
-    return { transitions: [], snapshot: snap };
-  }
-
-  const target = new Map<string, HarnessItem>();
-  const current = new Map<string, HarnessItem>();
-  for (const t of transitions) {
-    applyDelta(current, t.delta, t.ts, opts.scope, t.target);
-    if (t.version <= targetVersion) applyDelta(target, t.delta, t.ts, opts.scope, t.target);
-  }
-
-  const deltas: Delta[] = [];
-  for (const [id, it] of target) {
-    const cur = current.get(id);
-    if (!cur) {
-      deltas.push({
-        op: "create",
-        kind: it.kind,
-        content: it.content,
-        evidence: it.evidence,
-        importance: it.importance,
-        ...(it.models ? { models: it.models } : {}),
-      });
-      if (!it.active) deltas.push({ op: "update", id, active: false });
-      continue;
+  return withJournalLock(path, async () => {
+    const transitions = await readTransitions(path);
+    const latest = transitions.reduce((m, t) => Math.max(m, t.version), 0);
+    const targetVersion = Math.min(Math.max(0, Math.floor(opts.version)), latest);
+    if (targetVersion >= latest) {
+      const snap = await currentSnapshot(opts.scope, opts.cwd);
+      return { transitions: [], snapshot: snap };
     }
-    const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean; models?: string[] } = { op: "update", id };
-    if (cur.content !== it.content) upd.content = it.content;
-    if (cur.evidence !== it.evidence) upd.evidence = it.evidence;
-    if (cur.importance !== it.importance) upd.importance = it.importance;
-    if (cur.active !== it.active) upd.active = it.active;
-    if ((cur.models ?? undefined) !== (it.models ?? undefined)) upd.models = it.models;
-    if (Object.keys(upd).length > 2) deltas.push(upd);
-  }
-  for (const id of current.keys()) {
-    if (!target.has(id)) deltas.push({ op: "delete", id, reason: `reverted: absent at v${targetVersion}` });
-  }
 
-  if (deltas.length === 0) {
-    const snap = await currentSnapshot(opts.scope, opts.cwd);
-    return { transitions: [], snapshot: snap };
-  }
-  return appendDeltas({
-    scope: opts.scope,
-    cwd: opts.cwd,
-    actor: opts.actor,
-    source: "manual",
-    deltas,
-    note: `revert to v${targetVersion}`,
+    const target = new Map<string, HarnessItem>();
+    const current = new Map<string, HarnessItem>();
+    for (const t of transitions) {
+      applyDelta(current, t.delta, t.ts, opts.scope, t.target);
+      if (t.version <= targetVersion) applyDelta(target, t.delta, t.ts, opts.scope, t.target);
+    }
+
+    const deltas: Delta[] = [];
+    for (const [id, it] of target) {
+      const cur = current.get(id);
+      if (!cur) {
+        deltas.push({
+          op: "create",
+          kind: it.kind,
+          content: it.content,
+          evidence: it.evidence,
+          importance: it.importance,
+          ...(it.models ? { models: it.models } : {}),
+        });
+        if (!it.active) deltas.push({ op: "update", id, active: false });
+        continue;
+      }
+      const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean; models?: string[] } = { op: "update", id };
+      if (cur.content !== it.content) upd.content = it.content;
+      if (cur.evidence !== it.evidence) upd.evidence = it.evidence;
+      if (cur.importance !== it.importance) upd.importance = it.importance;
+      if (cur.active !== it.active) upd.active = it.active;
+      if ((cur.models ?? undefined) !== (it.models ?? undefined)) upd.models = it.models;
+      if (Object.keys(upd).length > 2) deltas.push(upd);
+    }
+    for (const id of current.keys()) {
+      if (!target.has(id)) deltas.push({ op: "delete", id, reason: `reverted: absent at v${targetVersion}` });
+    }
+
+    if (deltas.length === 0) {
+      const snap = await currentSnapshot(opts.scope, opts.cwd);
+      return { transitions: [], snapshot: snap };
+    }
+    return appendDeltasLocked(
+      { scope: opts.scope, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas, note: `revert to v${targetVersion}` },
+      path,
+    );
   });
 }
 export async function history(scope: Scope, cwd?: string, limit = 20): Promise<Transition[]> {
