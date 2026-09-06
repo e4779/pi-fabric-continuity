@@ -1,10 +1,12 @@
 // Behavioral probes for the continuity journal (no test framework needed).
-// Run: tsc -p tsconfig.build.json && HOME=/tmp/fakehome node tests/journal.probe.mjs
+// Run: tsc -p tsconfig.build.json && node tests/journal.probe.mjs
 import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { probeHome, resetJournals } from "./hermetic.mjs";
 
 const candidates = ["/tmp/continuity-probe/src/journal.js", "/tmp/continuity-probe/journal.js"];
 const found = candidates.find((p) => existsSync(p));
 if (!found) throw new Error("emitted journal.js not found; run tsc -p tsconfig.build.json first");
+probeHome(); // must precede the import: journal.js resolves ROOT from $HOME
 const j = await import(found);
 
 const results = [];
@@ -13,6 +15,10 @@ function check(name, cond, detail = "") {
 }
 
 const cwd = "/tmp/fakehome/proj";
+
+// Hermetic baseline: this probe asserts absolute versions, so start from
+// empty journals no matter what earlier runs (or crashes) left behind.
+resetJournals(j, [["project", cwd], ["global", cwd]]);
 
 // 1) validation rejects incomplete deltas
 check("validate: empty content rejected", j.validateDelta({ op: "create", kind: "prompt", content: "", evidence: "x" }) !== null);

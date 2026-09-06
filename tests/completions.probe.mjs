@@ -2,12 +2,18 @@
 // The TUI replaces the ENTIRE argument text with the accepted value, so
 // multi-word suggestions must embed the subcommand: "keep <id>".
 import { existsSync } from "node:fs";
+import { probeHome, resetJournals } from "./hermetic.mjs";
 
 const base = "/tmp/continuity-probe";
 const jPath = [`${base}/src/journal.js`, `${base}/journal.js`].find((p) => existsSync(p));
 const cPath = [`${base}/src/commands.js`, `${base}/commands.js`].find((p) => existsSync(p));
 if (!jPath || !cPath) throw new Error("emitted modules not found");
+probeHome(); // must precede the import: journal.js resolves ROOT from $HOME
 const j = await import(jPath);
+
+// Hermetic baseline: fresh project journal (cwd-derived slug), so the
+// "revert 1" completion below is deterministic.
+resetJournals(j, [["project", undefined]]);
 
 await j.appendDeltas({ scope: "project", actor: "probe", source: "manual", deltas: [
   { op: "create", kind: "memory", content: "probe item", evidence: "completions probe" },

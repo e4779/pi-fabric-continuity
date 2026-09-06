@@ -97,7 +97,7 @@ Probes (no framework needed):
 
 ```bash
 npm run -s typecheck || npx tsc --noEmit -p tsconfig.json
-tsc -p tsconfig.build.json && HOME=/tmp/fakehome node tests/journal.probe.mjs && HOME=/tmp/fakehome node tests/refine.probe.mjs
+tsc -p tsconfig.build.json && node tests/journal.probe.mjs && node tests/completions.probe.mjs && node tests/refine.probe.mjs
 ```
 
 ## License
