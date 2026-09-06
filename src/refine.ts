@@ -41,7 +41,12 @@ export interface RefineResult {
 }
 
 /** Bump when refine behavior changes; appears in last-refine.log. */
-const REFINE_LOG_VERSION = 3;
+const REFINE_LOG_VERSION = 4;
+
+/** Reasoning models spend output budget on thinking before emitting text:
+ *  a 4k ceiling let glm-5.3 burn the whole budget and return zero text
+ *  (stopReason "length"), surfacing as a healthy-looking zero-delta run. */
+const PROPOSER_MAX_TOKENS = 16384;
 
 /** Best-effort debug log of the last refine run: never breaks refine itself. */
 async function writeRefineDebugLog(entry: Record<string, unknown>): Promise<void> {
@@ -81,10 +86,11 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     messages: [{ role: "user", content: buildUserText(snap.items, evidence, opts.instructions, scope === "project" ? globalSnap.items : undefined), timestamp: Date.now() }],
   } as unknown as Parameters<typeof registry.complete>[1];
   const msg = (await registry.complete(model, context, {
-    maxTokens: 4096,
+    maxTokens: PROPOSER_MAX_TOKENS,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
   })) as unknown as { content: unknown; stopReason?: unknown; error?: unknown; usage?: unknown; responseModel?: unknown };
   const replyText = textOf(msg.content).trim();
+  const stopReason = typeof msg.stopReason === "string" ? msg.stopReason : null;
   const parsed = parseProposerOutput(replyText);
   const deltas = (parsed?.deltas ?? []).filter((d): d is Delta => validateDelta(d) === null);
   const modelId = model as unknown as { provider: string; id: string };
@@ -94,6 +100,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     scope,
     cwd,
     lookback,
+    maxTokens: PROPOSER_MAX_TOKENS,
     instructions: opts.instructions ?? null,
     model: `${modelId.provider}/${modelId.id}`,
     evidenceChars: evidence.length,
@@ -101,7 +108,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     routed: [...splitByScope(deltas, scope)].filter(([, g]) => g.length > 0).map(([s, g]) => `${g.length}->${s}`),
     replyChars: replyText.length,
     reply: replyText.slice(0, 4000),
-    stopReason: typeof msg.stopReason === "string" ? msg.stopReason : null,
+    stopReason,
     error: msg.error === undefined ? null : String(msg.error).slice(0, 500),
     responseModel: typeof msg.responseModel === "string" ? msg.responseModel : null,
     usage: msg.usage === undefined ? null : msg.usage,
@@ -134,10 +141,15 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   }
   const unparseable = replyText.length > 0 && parsed === null;
   const empty = replyText.length === 0;
+  const truncated = stopReason === "length";
   const summary = empty
-    ? "proposer returned an empty reply (model produced no text)"
+    ? truncated
+      ? `proposer hit the ${PROPOSER_MAX_TOKENS}-token ceiling before emitting any text (reasoning model burned the budget on thinking)`
+      : "proposer returned an empty reply (model produced no text)"
     : unparseable
-      ? "proposer output unparseable — no deltas applied"
+      ? truncated
+        ? "proposer output truncated at the token ceiling — no deltas applied"
+        : "proposer output unparseable — no deltas applied"
       : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
   await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
   return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version };
