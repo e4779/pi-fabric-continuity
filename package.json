@@ -5,7 +5,11 @@
   "type": "module",
   "main": "./src/index.ts",
   "keywords": ["pi-extension", "pi-package", "pi-fabric", "continual-harness", "self-improvement"],
-  "license": "BSD-2-Clause",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
   "author": "e4779",
   "repository": {
     "type": "git",
