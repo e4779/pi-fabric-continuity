@@ -41,7 +41,8 @@ export interface RefineResult {
 }
 
 /** Bump when refine behavior changes; appears in last-refine.log. */
-const REFINE_LOG_VERSION = 4;
+/** Bump when refine behavior changes; appears in last-refine.log. */
+const REFINE_LOG_VERSION = 5;
 
 /** Reasoning models spend output budget on thinking before emitting text:
  *  a 4k ceiling let glm-5.3 burn the whole budget and return zero text
@@ -116,6 +117,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     parsedOk: parsed !== null,
     proposedCount: parsed?.deltas.length ?? 0,
     appliedCount: deltas.length,
+    liveRunsAtLogTime: activeRuns,
   });
 
   let applied = 0;
@@ -130,14 +132,18 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       if (targetScope === scope) version = out.snapshot.version;
       routed.push(`${group.length}->${targetScope}`);
     }
-    pi.appendEntry("continuity-refinement", {
-      source: opts.auto ? "auto" : "manual",
-      summary: parsed?.summary ?? "",
-      applied,
-      routed,
-      version,
-      ts: Date.now(),
-    });
+    // Deliver to the transcript only while a run is live; for an idle session
+    // this append is exactly what wakes it (2026-09-15 resurrection incident).
+    if (activeRuns > 0) {
+      pi.appendEntry("continuity-refinement", {
+        source: opts.auto ? "auto" : "manual",
+        summary: parsed?.summary ?? "",
+        applied,
+        routed,
+        version,
+        ts: Date.now(),
+      });
+    }
   }
   const unparseable = replyText.length > 0 && parsed === null;
   const empty = replyText.length === 0;
@@ -158,11 +164,22 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
 // turn_end cadence — module state, reset on session_start.
 let lastTurn = -1;
 
+// Transcript-delivery gating: appending an entry to an idle session wakes it
+// (the runtime treats transcript growth as new input). The proposer's ~30-60s
+// await means the run has usually ENDED by delivery time, so a refine cadence
+// became a session-resurrection loop: wake -> degenerate run -> turn_end ->
+// refine -> wake. Count live runs; deliver to the transcript only while one is
+// active. Idle sessions still get the deltas — before_agent_start re-injects
+// the journal snapshot into the next run's system prompt.
+let activeRuns = 0;
+
 export function resetCadence(): void {
   lastTurn = -1;
 }
 
 export function registerAutoRefine(pi: ExtensionAPI): void {
+  pi.on("agent_start", () => { activeRuns += 1 });
+  pi.on("agent_end", () => { activeRuns = Math.max(0, activeRuns - 1) });
   pi.on("turn_end", async (event, ctx) => {
     const config = await loadConfig();
     const { fire, next } = evaluateCadence(config.autoRefine, event.turnIndex, lastTurn);
