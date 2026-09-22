@@ -7,18 +7,21 @@ import { appendDeltas, currentSnapshot, history, moveItem, revertToVersion } fro
 import { runRefine } from "./refine.js";
 import { lastKnownSessionCwd, sessionCwdOf } from "./session-cwd.js";
 import { auditItems, proposedDeltas } from "./audit.js";
-import type { Delta, Scope } from "./types.js";
+import { searchItems } from "./search.js";
+import { loadConfig } from "./config.js";
+import { readCounters, recordTouches, statsForItems } from "./counters.js";
+import type { Delta, HarnessItem, Scope } from "./types.js";
 
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
-    description: "continuity: status | list | history [n] | refine [lookback] | audit [--apply] | keep/drop <id> | move <id> <scope> | revert <version>",
+    description: "continuity: status | list | search <query> | stats | history [n] | refine [lookback] | audit [--apply] | keep/drop <id> | move <id> <scope> | revert <version>",
     // TUI contract: applyCompletion replaces the ENTIRE argument text with the
     // accepted item's value, so multi-word suggestions must repeat the
     // subcommand in value ("keep <id>", "list <kind>", "revert <version>").
     getArgumentCompletions: (argumentPrefix: string) => {
       const arg = argumentPrefix.trimStart();
       if (!arg.includes(" ")) {
-        const subs = ["status", "list", "history", "refine", "audit", "keep", "drop", "move", "revert"]
+        const subs = ["status", "list", "search", "stats", "history", "refine", "audit", "keep", "drop", "move", "revert"]
           .filter((s) => s.startsWith(arg))
           .map((s) => ({ value: s, label: s }));
         return subs.length > 0 ? subs : null;
@@ -125,6 +128,12 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
         const bump = sub === "keep" ? 0.1 : -0.1;
         const importance = Math.round(Math.min(1, Math.max(0, item.importance + bump)) * 100) / 100;
         await appendDeltas({ scope: item.scope, cwd, actor: "command:harness", source: "manual", deltas: [{ op: "update", id: item.id, importance }] });
+        // F1.2: keep is an explicit touch — the note earned its tokens.
+        try {
+          await recordTouches([item.id]);
+        } catch {
+          // Counters unavailable — the journaled keep stands.
+        }
         await ctx.ui.notify(`continuity: ${item.id} importance ${item.importance.toFixed(2)} -> ${importance.toFixed(2)}`, "info");
         return;
       }
@@ -184,6 +193,41 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
           ),
         ];
         await ctx.ui.notify(lines.length ? lines.join("\n") : "continuity: no items yet", "info");
+        return;
+      }
+      if (sub === "search") {
+        // F3.2: same hits as continuity.search, rendered for the human.
+        const query = parts.slice(1).join(" ").trim();
+        if (!query) {
+          await ctx.ui.notify("usage: /harness search <query>", "info");
+          return;
+        }
+        const res = await searchItems({ query, cwd });
+        if (res.hits.length === 0) {
+          await ctx.ui.notify(`continuity search: no matches for "${query}"`, "info");
+          return;
+        }
+        const lines = res.hits.map((h) => {
+          const meta = [h.scope, h.kind, h.current ? "current" : "historical", `v${h.version}`].filter(Boolean).join(", ");
+          return `[${h.id}] (${meta}) ${h.field}: ${h.snippet}`;
+        });
+        const cap = res.total > res.hits.length ? ` (of ${res.total}, showing first ${res.hits.length})` : "";
+        await ctx.ui.notify([`continuity search "${query}" — ${res.hits.length} hit(s)${cap}:`, ...lines].join("\n"), "info");
+        return;
+      }
+      if (sub === "stats") {
+        const config = await loadConfig();
+        const counters = await readCounters();
+        const snap = await currentSnapshot("project", cwd);
+        const gsnap = await currentSnapshot("global", cwd);
+        const line = (prefix: string, i: HarnessItem) => {
+          const s = statsForItems([i], counters, config.decayAfterInjections)[0];
+          const last = s.lastInjectedAt === null ? "never" : new Date(s.lastInjectedAt).toISOString().slice(0, 19);
+          return `${prefix}[${i.id}] inj ${s.injections} touch ${s.touches} last ${last}${s.decayEligible ? "  <- decay candidate" : ""}`;
+        };
+        const lines = [...snap.items.map((i) => line("", i)), ...gsnap.items.map((i) => line("(global) ", i))];
+        const header = `continuity stats — decay after ${config.decayAfterInjections} zero-touch injection(s):`;
+        await ctx.ui.notify(lines.length ? [header, ...lines].join("\n") : "continuity: no items yet", "info");
         return;
       }
       if (sub === "history") {

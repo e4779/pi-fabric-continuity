@@ -16,6 +16,9 @@ import {
 } from "pi-fabric/protocol";
 import { appendDeltas, currentSnapshot, history, journalPath, moveItem, revertToVersion, splitByScope, validateDelta } from "./journal.js";
 import { auditItems, proposedDeltas } from "./audit.js";
+import { searchItems } from "./search.js";
+import { loadConfig } from "./config.js";
+import { readCounters, recordTouches, statsForItems } from "./counters.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
 
 const scopeSchema = { type: "string", enum: ["project", "global"], default: "project" };
@@ -47,6 +50,12 @@ function descriptors(): FabricActionDescriptor[] {
       inputSchema: { type: "object", properties: { id: { type: "string" }, scope: scopeSchema, cwd: str }, required: ["id"], additionalProperties: false },
     },
     {
+      name: "search",
+      description: "Case-insensitive literal search over current harness items and historical journal text (superseded versions, deleted items). Each hit: id, version/ts, bounded snippet. No LLM.",
+      risk: "read",
+      inputSchema: { type: "object", properties: { query: { type: "string" }, scope: scopeSchema, cwd: str }, required: ["query"], additionalProperties: false },
+    },
+    {
       name: "history",
       description: "Recent journal transitions (who/when/why) for audit.",
       risk: "read",
@@ -55,6 +64,12 @@ function descriptors(): FabricActionDescriptor[] {
     {
       name: "audit",
       description: "Deterministic staleness check: verify active items' path and package references against the live machine. Read-only proposals; apply deletes via mutate.",
+      risk: "read",
+      inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str }, additionalProperties: false },
+    },
+    {
+      name: "stats",
+      description: "Attribution counters per item: injections into the system prompt, touches (continuity.mutate transition or /harness keep), last injection time; decay-eligible items flagged.",
       risk: "read",
       inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str }, additionalProperties: false },
     },
@@ -127,6 +142,12 @@ function makeProvider(): FabricProvider {
           const snap = await currentSnapshot(scope, cwd);
           return snap.items.find((i) => i.id === id) ?? null;
         }
+        case "search": {
+          // F3.1: scope omitted searches both journals; each hit is tagged.
+          const query = typeof args.query === "string" ? args.query : "";
+          const scopeArg = args.scope === "global" || args.scope === "project" ? args.scope : undefined;
+          return searchItems({ query, ...(scopeArg ? { scope: scopeArg } : {}), cwd });
+        }
         case "history": {
           const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : 20;
           return { scope, transitions: await history(scope, cwd, limit) };
@@ -136,6 +157,17 @@ function makeProvider(): FabricProvider {
           const globalSnap = await currentSnapshot("global", cwd);
           const findings = auditItems([...globalSnap.items, ...snap.items]);
           return { findings, proposed: proposedDeltas(findings) };
+        }
+        case "stats": {
+          const snap = await currentSnapshot(scope, cwd);
+          const counters = await readCounters();
+          const config = await loadConfig();
+          return {
+            scope,
+            version: snap.version,
+            decayAfterInjections: config.decayAfterInjections,
+            stats: statsForItems(snap.items, counters, config.decayAfterInjections),
+          };
         }
         case "revert": {
           const version = typeof args.version === "number" ? Math.floor(args.version) : NaN;
@@ -158,10 +190,12 @@ function makeProvider(): FabricProvider {
           const moves = deltas.filter((d) => (d as { op?: string }).op === "move");
           const rest = deltas.filter((d) => (d as { op?: string }).op !== "move");
           const moved = [] as Array<{ id: string; from: string | null; to: string; moved: boolean }>;
+          const touched: string[] = [];
           for (const m of moves) {
             const mv = m as { id: string; to: Scope };
             const r = await moveItem({ cwd, id: mv.id, to: mv.to, actor });
             moved.push({ id: mv.id, from: r.from, to: mv.to, moved: r.moved });
+            if (r.moved) touched.push(mv.id);
           }
           let applied = 0;
           let version = (await currentSnapshot(scope, cwd)).version;
@@ -170,8 +204,16 @@ function makeProvider(): FabricProvider {
             if (group.length === 0) continue;
             const out = await appendDeltas({ scope: targetScope, cwd, actor, source, deltas: group });
             applied += out.transitions.length;
+            touched.push(...out.transitions.map((t) => t.target).filter((t): t is string => typeof t === "string"));
             if (targetScope === scope) version = out.snapshot.version;
             routed.push(`${group.length}->${targetScope}`);
+          }
+          // F1.2: acting on an item through mutate counts as a touch. The
+          // counters file is derived state — never fail a journaled mutate.
+          try {
+            await recordTouches(touched);
+          } catch {
+            // Counters unavailable — the journal write stands.
           }
           return { applied, version, routed, moved };
         }

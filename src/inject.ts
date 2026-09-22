@@ -7,6 +7,7 @@
 // the provider request prefix stays prompt-cacheable (vcc-style stable-first).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { recordInjections } from "./counters.js";
 import { currentSnapshot } from "./journal.js";
 import type { ComponentKind, HarnessItem } from "./types.js";
 
@@ -64,9 +65,10 @@ export function selectForInjection(items: HarnessItem[], modelKey: string | unde
   return { selected, omitted };
 }
 
-export function renderContinuityBlock(items: HarnessItem[], modelKey: string | undefined, cfg: InjectionConfig): string {
-  if (items.length === 0) return "";
-  const { selected, omitted } = selectForInjection(items, modelKey, cfg);
+/** Render the block from an explicit selection — split from
+ *  selectForInjection so the injector can record exactly the injected ids
+ *  (F1.1) without selecting twice. */
+export function renderSelectedBlock(selected: HarnessItem[], omitted: number): string {
   if (selected.length === 0) return "";
   const sections: string[] = [];
   for (const kind of KIND_ORDER) {
@@ -94,6 +96,12 @@ export function renderContinuityBlock(items: HarnessItem[], modelKey: string | u
   return lines.join("\n");
 }
 
+export function renderContinuityBlock(items: HarnessItem[], modelKey: string | undefined, cfg: InjectionConfig): string {
+  if (items.length === 0) return "";
+  const { selected, omitted } = selectForInjection(items, modelKey, cfg);
+  return renderSelectedBlock(selected, omitted);
+}
+
 export function registerInjection(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     const cfg = DEFAULT_INJECTION;
@@ -113,8 +121,17 @@ export function registerInjection(pi: ExtensionAPI): void {
     } catch {
       // Global journal unavailable — project items only.
     }
-    const block = renderContinuityBlock(items, modelKeyOf(ctx.model as { provider: string; id: string } | undefined), cfg);
+    const modelKey = modelKeyOf(ctx.model as { provider: string; id: string } | undefined);
+    const selection = selectForInjection(items, modelKey, cfg);
+    const block = renderSelectedBlock(selection.selected, selection.omitted);
     if (!block) return;
+    // F1.1: count exactly the items that made it into the prompt; the
+    // counters file is derived state and must never break injection.
+    try {
+      await recordInjections(selection.selected.map((i) => i.id));
+    } catch {
+      // Counters unavailable — skip the increment, inject as usual.
+    }
     return { systemPrompt: event.systemPrompt + "\n" + block };
   });
 }

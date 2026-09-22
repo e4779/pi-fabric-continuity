@@ -198,8 +198,9 @@ export interface AppendOutcome {
 }
 
 /** Inter-process writer lock: exclusive-create with stale takeover.
- *  Serializes read-version + append across pi sessions sharing one journal. */
-async function withJournalLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+ *  Serializes read-version + append across pi sessions sharing one journal.
+ *  Also guards other continuity state files (counters read-modify-write). */
+export async function withJournalLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await mkdir(dirname(path), { recursive: true });
   const lockPath = path + ".lock";
   const deadline = Date.now() + 10000;

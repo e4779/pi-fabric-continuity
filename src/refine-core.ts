@@ -8,6 +8,12 @@ export const DEFAULT_LOOKBACK_TURNS = 25;
 export const DEFAULT_EVIDENCE_BYTES = 16000;
 const PER_ENTRY_CHAR_CAP = 2000;
 
+// F2 — vcc evidence: bounded vcc_recall output under a labeled section of the
+// proposer user text (provenance visible per F2.4, size capped per F2.2).
+export const VCC_EVIDENCE_CHARS = 2000;
+export const VCC_MAX_QUERIES = 3;
+export const VCC_SECTION_HEADER = "Vcc recall evidence (vcc_recall over session history):";
+
 export const PROPOSER_SYSTEM = `You are the continuity refiner for a coding agent. You receive the agent's current harness items and recent trajectory evidence. Propose small, evidence-backed improvements as structured CRUD deltas.
 
 Item kinds: prompt (behavioral note to the agent itself), memory (durable fact), skill (how to use a capability well), subagent (reusable delegation spec).
@@ -103,14 +109,29 @@ export function gatherEvidence(
   return out;
 }
 
+/** F2.2: project-relevant recall queries derived from the working directory. */
+export function projectQueries(cwd: string): string[] {
+  const base = cwd.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  return base ? [base] : [];
+}
+
+/** F2.4: the labeled vcc section, capped to VCC_EVIDENCE_CHARS; "" when empty. */
+export function vccSection(text: string | undefined | null): string {
+  const t = (text ?? "").trim();
+  if (!t) return "";
+  const capped = t.length > VCC_EVIDENCE_CHARS ? t.slice(0, VCC_EVIDENCE_CHARS) + " …" : t;
+  return `${VCC_SECTION_HEADER}\n${capped}`;
+}
+
 /** Build the proposer's user message: current store + evidence. */
-export function buildUserText(items: HarnessItem[], evidence: string, instructions?: string, globalItems?: HarnessItem[]): string {
+export function buildUserText(items: HarnessItem[], evidence: string, instructions?: string, globalItems?: HarnessItem[], vcc?: string): string {
   const listing = items.length
     ? items.map((i) => `- [${i.id}] ${i.kind} ${i.importance.toFixed(2)}${i.active ? "" : " (inactive)"}: ${i.content}`).join("\n")
     : "(empty store)";
   const globalListing = globalItems && globalItems.length
     ? globalItems.map((i) => `- [${i.id}] (global) ${i.kind} ${i.importance.toFixed(2)}${i.active ? "" : " (inactive)"}: ${i.content}`).join("\n")
     : "";
+  const vccBlock = vccSection(vcc);
   return [
     ...(instructions ? ["Operator instructions (binding for this run):", instructions, ""] : []),
     "Current harness items (project):",
@@ -119,6 +140,7 @@ export function buildUserText(items: HarnessItem[], evidence: string, instructio
     "",
     "Recent trajectory evidence:",
     evidence,
+    ...(vccBlock ? ["", vccBlock] : []),
     "",
     "Propose deltas per the system rules. STRICT JSON only.",
   ].join("\n");

@@ -7,6 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
+import { decayProposals, readCounters } from "./counters.js";
 import {
   DEFAULT_LOOKBACK_TURNS,
   PROPOSER_SYSTEM,
@@ -18,6 +19,7 @@ import {
 } from "./refine-core.js";
 import { appendDeltas, currentSnapshot, splitByScope, validateDelta } from "./journal.js";
 import { sessionCwdOf } from "./session-cwd.js";
+import { collectVccEvidence } from "./vcc.js";
 import type { Delta, Scope } from "./types.js";
 
 export interface RefineOptions {
@@ -37,12 +39,14 @@ export interface RefineResult {
   applied: number;
   summary: string;
   version: number;
+  /** F1.4: decay proposals journaled this run (importance decreases). */
+  decay?: number;
   skipped?: string;
 }
 
 /** Bump when refine behavior changes; appears in last-refine.log. */
 /** Bump when refine behavior changes; appears in last-refine.log. */
-const REFINE_LOG_VERSION = 5;
+const REFINE_LOG_VERSION = 6;
 
 /** Reasoning models spend output budget on thinking before emitting text:
  *  a 4k ceiling let glm-5.3 burn the whole budget and return zero text
@@ -66,6 +70,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   const base = { scope, lookback };
   const cwd = sessionCwdOf(ctx);
 
+  const config = await loadConfig();
   await ctx.ui.notify("continuity refine: proposing (real model call, may take ~30s)…", "info");
   const snap = await currentSnapshot(scope, cwd);
   const globalSnap = scope === "project" ? await currentSnapshot("global", cwd) : snap;
@@ -82,9 +87,19 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     return { ...base, evidenceBytes: evidence.length, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no model registry or active model" };
   }
 
+  // F2: optional vcc evidence — bounded vcc_recall output under a labeled
+  // section of the proposer user text. Silent fallback: flag off, pi-vcc
+  // absent, or a failed call all leave refine unchanged (spec F2.3).
+  let vcc: string | undefined;
+  try {
+    vcc = await collectVccEvidence({ enabled: config.vccEvidence, cwd, ctx });
+  } catch {
+    vcc = undefined; // belt and braces: vcc must never fail a refine run
+  }
+
   const context = {
     systemPrompt: PROPOSER_SYSTEM,
-    messages: [{ role: "user", content: buildUserText(snap.items, evidence, opts.instructions, scope === "project" ? globalSnap.items : undefined), timestamp: Date.now() }],
+    messages: [{ role: "user", content: buildUserText(snap.items, evidence, opts.instructions, scope === "project" ? globalSnap.items : undefined, vcc), timestamp: Date.now() }],
   } as unknown as Parameters<typeof registry.complete>[1];
   const msg = (await registry.complete(model, context, {
     maxTokens: PROPOSER_MAX_TOKENS,
@@ -105,6 +120,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     instructions: opts.instructions ?? null,
     model: `${modelId.provider}/${modelId.id}`,
     evidenceChars: evidence.length,
+    vccChars: vcc?.length ?? 0,
     globalItemCount: globalSnap.items.length,
     routed: [...splitByScope(deltas, scope)].filter(([, g]) => g.length > 0).map(([s, g]) => `${g.length}->${s}`),
     replyChars: replyText.length,
@@ -123,8 +139,8 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   let applied = 0;
   let version = snap.version;
   const routed: string[] = [];
+  const actor = `model:${modelId.provider}/${modelId.id}`;
   if (deltas.length > 0) {
-    const actor = `model:${modelId.provider}/${modelId.id}`;
     for (const [targetScope, group] of splitByScope(deltas, scope)) {
       if (group.length === 0) continue;
       const out = await appendDeltas({ scope: targetScope, cwd, actor, source: "refine", deltas: group });
@@ -145,6 +161,26 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       });
     }
   }
+  // F1.4: attribution decay — active items that burned their injection budget
+  // without a single touch drop one importance tier. Deterministic proposals,
+  // journaled like every refine delta (no silent writes).
+  let decay = 0;
+  try {
+    const counters = await readCounters();
+    const decayDeltas = [
+      ...decayProposals(snap.items, counters, config.decayAfterInjections),
+      ...(scope === "project" ? decayProposals(globalSnap.items, counters, config.decayAfterInjections) : []),
+    ];
+    for (const [targetScope, group] of splitByScope(decayDeltas, scope)) {
+      if (group.length === 0) continue;
+      const out = await appendDeltas({ scope: targetScope, cwd, actor, source: "refine", deltas: group, note: "attribution decay" });
+      decay += out.transitions.length;
+      applied += out.transitions.length;
+      version = Math.max(version, out.snapshot.version);
+    }
+  } catch {
+    // Decay is advisory — a counters/config problem must not fail the run.
+  }
   const unparseable = replyText.length > 0 && parsed === null;
   const empty = replyText.length === 0;
   const truncated = stopReason === "length";
@@ -157,8 +193,8 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
         ? "proposer output truncated at the token ceiling — no deltas applied"
         : "proposer output unparseable — no deltas applied"
       : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
-  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
-  return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version };
+  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${decay > 0 ? `, ${decay} decay` : ""}${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
+  return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version, ...(decay > 0 ? { decay } : {}) };
 }
 
 // turn_end cadence — module state, reset on session_start.

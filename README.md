@@ -28,6 +28,10 @@ ln -s ~/projects/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuit
 ```
 /harness status            # journal versions + item counts (project & global)
 /harness list [kind]       # items, optionally filtered by prompt|memory|skill|subagent
+/harness search <query>   # case-insensitive literal search over current and historical items
+/harness stats            # per-item injection/touch counters + decay eligibility
+                          # AND historical journal text (old versions, deleted);
+                          # hits carry id, version/ts, bounded snippet
 /harness audit [--apply]   # deterministic staleness check: paths/packages vs the live machine
 /harness history [n]       # recent journal transitions (who/when/why)
 /harness refine [lookback] [instructions]
@@ -44,13 +48,22 @@ The same surface is a first-class fabric provider: any `fabric_exec` program
 (including spawned durable agents) can call
 `tools.call({ ref: "continuity.mutate", args: { deltas: [...] } })` with
 fabric-side validation, risk policy, and nested-call audit.
+`continuity.search` is the same search as `/harness search` as a read-risk
+action: `{ query, scope?, cwd? }` — literal, case-insensitive, no LLM.
+`continuity.stats` is the read-risk view behind `/harness stats`: per-item
+injection/touch counters with decay eligibility (see F1 attribution counters).
 
-Auto-refine cadence (opt-in):
+Auto-refine cadence and refine evidence (opt-in):
 
 ```json
 // ~/.pi/agent/continuity/config.json
-{ "autoRefine": { "enabled": true, "everyTurns": 50 } }
+{ "autoRefine": { "enabled": true, "everyTurns": 50 }, "vccEvidence": false }
 ```
+
+`"vccEvidence": true` feeds the refine proposer a bounded, labeled section of
+`vcc_recall` output (queries derived from the project directory, ~2k char cap).
+Requires @monotykamary/pi-vcc; when it is absent or the call fails, refine
+proceeds unchanged.
 
 ## The daily loop
 
