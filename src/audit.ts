@@ -108,7 +108,8 @@ function missingPaths(content: string, ctx?: AuditContext): string[] {
 function missingPackages(content: string, installed: Set<string>): string[] {
   const missing: string[] = [];
   for (const raw of content.match(PKG_TOKEN_RE) ?? []) {
-    const name = raw.replace(/^npm:/, "");
+    // package tokens include "." and "/" — a sentence-ending dot rides along
+    const name = raw.replace(/^npm:/, "").replace(/[.,;:)\]]+$/, "");
     if (name.includes("/")) {
       if (!installed.has(name)) missing.push(name);
       continue;

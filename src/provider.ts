@@ -155,7 +155,7 @@ function makeProvider(): FabricProvider {
         case "audit": {
           const snap = await currentSnapshot(scope, cwd);
           const globalSnap = await currentSnapshot("global", cwd);
-          const findings = auditItems([...globalSnap.items, ...snap.items]);
+          const findings = auditItems([...globalSnap.items, ...snap.items], { cwd });
           return { findings, proposed: proposedDeltas(findings) };
         }
         case "stats": {

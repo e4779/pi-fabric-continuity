@@ -155,7 +155,7 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
         const apply = parts.includes("--apply");
         const snap = await currentSnapshot("project", cwd);
         const gsnap = await currentSnapshot("global", cwd);
-        const findings = auditItems([...gsnap.items, ...snap.items]);
+        const findings = auditItems([...gsnap.items, ...snap.items], { cwd });
         if (findings.length === 0) {
           await ctx.ui.notify("continuity audit: all active items check out", "info");
           return;

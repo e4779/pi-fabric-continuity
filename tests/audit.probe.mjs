@@ -54,5 +54,20 @@ check("migrated-from marker not flagged", !prov.some((f) => f.reason === "packag
 const real = a.auditItems([{ id: "c_real", kind: "memory", active: true, content: "record observations", evidence: "installed as npm:pi-nonexistent-here", importance: 1, scope: "project", createdAt: 7, updatedAt: 7 }], { home });
 check("genuine evidence claim still flagged", real.some((f) => f.reason === "package-absent" && f.id === "c_real"));
 
+// Call sites must forward { cwd } — regression guard for the integration gap
+// the work machine hit (unit passed, provider/commands dropped the context).
+const fs = await import("node:fs");
+const callSiteRe = /auditItems\(\[[^\]]*\],\s*\{\s*cwd[\s}]/;
+const readEmitted = (name) => {
+  for (const p of [`/tmp/continuity-probe/src/${name}`, `/tmp/continuity-probe/${name}`]) {
+    if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
+  }
+  throw new Error(`emitted ${name} not found; run tsc -p tsconfig.build.json first`);
+};
+const providerSrc = readEmitted("provider.js");
+const commandsSrc = readEmitted("commands.js");
+check("provider call site forwards cwd", callSiteRe.test(providerSrc));
+check("commands call site forwards cwd", callSiteRe.test(commandsSrc));
+
 console.log(results.join("\n"));
 if (results.some((r) => r.startsWith("FAIL"))) process.exitCode = 1;
