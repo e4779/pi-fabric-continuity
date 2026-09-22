@@ -6,17 +6,19 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { appendDeltas, currentSnapshot, history, moveItem, revertToVersion } from "./journal.js";
 import { runRefine } from "./refine.js";
 import { lastKnownSessionCwd, sessionCwdOf } from "./session-cwd.js";
+import { auditItems, proposedDeltas } from "./audit.js";
+import type { Delta, Scope } from "./types.js";
 
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
-    description: "continuity: status | list | history [n] | refine [lookback] | keep/drop <id> | move <id> <scope> | revert <version>",
+    description: "continuity: status | list | history [n] | refine [lookback] | audit [--apply] | keep/drop <id> | move <id> <scope> | revert <version>",
     // TUI contract: applyCompletion replaces the ENTIRE argument text with the
     // accepted item's value, so multi-word suggestions must repeat the
     // subcommand in value ("keep <id>", "list <kind>", "revert <version>").
     getArgumentCompletions: (argumentPrefix: string) => {
       const arg = argumentPrefix.trimStart();
       if (!arg.includes(" ")) {
-        const subs = ["status", "list", "history", "refine", "keep", "drop", "move", "revert"]
+        const subs = ["status", "list", "history", "refine", "audit", "keep", "drop", "move", "revert"]
           .filter((s) => s.startsWith(arg))
           .map((s) => ({ value: s, label: s }));
         return subs.length > 0 ? subs : null;
@@ -138,6 +140,36 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
         } catch (err) {
           await ctx.ui.notify(`continuity revert failed: ${String(err)}`, "warning");
         }
+        return;
+      }
+      if (sub === "audit") {
+        const apply = parts.includes("--apply");
+        const snap = await currentSnapshot("project", cwd);
+        const gsnap = await currentSnapshot("global", cwd);
+        const findings = auditItems([...gsnap.items, ...snap.items]);
+        if (findings.length === 0) {
+          await ctx.ui.notify("continuity audit: all active items check out", "info");
+          return;
+        }
+        if (!apply) {
+          const lines = findings.map((f) => `[${f.id}] (${f.kind}) ${f.reason}: ${f.detail}`);
+          const body = [`continuity audit — ${findings.length} finding(s):`, ...lines, "", "/harness audit --apply to retire flagged item(s)"].join("\n");
+          await ctx.ui.notify(body, "info");
+          return;
+        }
+        const deltas = proposedDeltas(findings);
+        const all = [...snap.items, ...gsnap.items];
+        const byScope = new Map<Scope, Delta[]>();
+        for (const d of deltas) {
+          const scope: Scope = all.find((i) => i.id === d.id)?.scope ?? "project";
+          byScope.set(scope, [...(byScope.get(scope) ?? []), d]);
+        }
+        let applied = 0;
+        for (const [scope, group] of byScope) {
+          const out = await appendDeltas({ scope, cwd, actor: "command:harness", source: "manual", deltas: group });
+          applied += out.transitions.length;
+        }
+        await ctx.ui.notify(`continuity audit: retired ${applied} item(s) (revert via /harness history)`, "info");
         return;
       }
       if (sub === "list") {

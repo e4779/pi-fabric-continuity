@@ -15,6 +15,7 @@ import {
   type FabricProviderRegistration,
 } from "pi-fabric/protocol";
 import { appendDeltas, currentSnapshot, history, journalPath, moveItem, revertToVersion, splitByScope, validateDelta } from "./journal.js";
+import { auditItems, proposedDeltas } from "./audit.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
 
 const scopeSchema = { type: "string", enum: ["project", "global"], default: "project" };
@@ -50,6 +51,12 @@ function descriptors(): FabricActionDescriptor[] {
       description: "Recent journal transitions (who/when/why) for audit.",
       risk: "read",
       inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str, limit: { type: "number", default: 20 } }, additionalProperties: false },
+    },
+    {
+      name: "audit",
+      description: "Deterministic staleness check: verify active items' path and package references against the live machine. Read-only proposals; apply deletes via mutate.",
+      risk: "read",
+      inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str }, additionalProperties: false },
     },
     {
       name: "revert",
@@ -123,6 +130,12 @@ function makeProvider(): FabricProvider {
         case "history": {
           const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : 20;
           return { scope, transitions: await history(scope, cwd, limit) };
+        }
+        case "audit": {
+          const snap = await currentSnapshot(scope, cwd);
+          const globalSnap = await currentSnapshot("global", cwd);
+          const findings = auditItems([...globalSnap.items, ...snap.items]);
+          return { findings, proposed: proposedDeltas(findings) };
         }
         case "revert": {
           const version = typeof args.version === "number" ? Math.floor(args.version) : NaN;

@@ -28,6 +28,7 @@ ln -s ~/projects/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuit
 ```
 /harness status            # journal versions + item counts (project & global)
 /harness list [kind]       # items, optionally filtered by prompt|memory|skill|subagent
+/harness audit [--apply]   # deterministic staleness check: paths/packages vs the live machine
 /harness history [n]       # recent journal transitions (who/when/why)
 /harness refine [lookback] [instructions]
                           # trajectory evidence -> LLM proposer -> journaled deltas;
