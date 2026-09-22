@@ -2,6 +2,9 @@
 // Immutable base + supplemental — never rewrites, only appends (Continual
 // Harness lineage). Selection is importance-ordered, capped per kind and by a
 // total token budget; `models` on an item is a soft relevance hint.
+// Emission order is cache-stable: within a kind, lines sort by (createdAt, id),
+// so importance churn between refines re-selects but never re-orders lines —
+// the provider request prefix stays prompt-cacheable (vcc-style stable-first).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { currentSnapshot } from "./journal.js";
@@ -67,7 +70,11 @@ export function renderContinuityBlock(items: HarnessItem[], modelKey: string | u
   if (selected.length === 0) return "";
   const sections: string[] = [];
   for (const kind of KIND_ORDER) {
-    const forKind = selected.filter((i) => i.kind === kind);
+    // Cache-stable order: selection decides WHO fits, (createdAt, id) decides
+    // WHERE the line sits — importance changes must not shuffle the block.
+    const forKind = selected
+      .filter((i) => i.kind === kind)
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     if (forKind.length === 0) continue;
     const bullets = forKind.map((i) => `- [${i.id}] ${i.content}`).join("\n");
     sections.push(`### ${TITLES[kind]}\n${bullets}`);

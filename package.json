@@ -1,6 +1,6 @@
 {
   "name": "pi-fabric-continuity",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Continual harness for pi on fabric primitives: provider-owned journal of self-improving notes/principles, exposed as the `continuity` FabricProvider and callable from fabric_exec.",
   "type": "module",
   "main": "./src/index.ts",
