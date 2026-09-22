@@ -32,12 +32,14 @@ export interface AuditFinding {
 export interface AuditContext {
   /** HOME used for `~` expansion and package discovery (tests override). */
   home?: string;
+  /** Project root: its node_modules (and the parent's, for monorepos) count as installed. */
+  cwd?: string;
   /** Package names considered installed (pi manifest entries). */
   manifestPackages?: string[];
 }
 
 const PATH_TOKEN_RE = /(?:~|\/home\/[\w.-]+|\/Users\/[\w.-]+)\/[\w@./-]+/g;
-const PKG_TOKEN_RE = /npm:[@a-z0-9][\w./-]*|@[a-z0-9][\w.-]*\/[\w.-]+|\bpi-[a-z0-9][\w-]*\b/g;
+const PKG_TOKEN_RE = /npm:[@a-z0-9][\w./-]*|@[a-z][\w.-]*\/[\w.-]+|\bpi-[a-z0-9][\w-]*\b/g;
 
 export function homeDir(ctx?: AuditContext): string {
   return ctx?.home ?? os.homedir();
@@ -78,6 +80,11 @@ export function installedPackages(ctx?: AuditContext): Set<string> {
   }
   for (const version of tryReaddir(path.join(home, ".nvm", "versions", "node"))) {
     scanFlat(path.join(home, ".nvm", "versions", "node", version, "lib", "node_modules"));
+  }
+  // project-local installs: <cwd>/node_modules and <cwd>/../node_modules (monorepo)
+  if (ctx?.cwd) {
+    scanFlat(path.join(ctx.cwd, "node_modules"));
+    scanFlat(path.join(ctx.cwd, "..", "node_modules"));
   }
   return found;
 }
@@ -126,7 +133,11 @@ export function auditItems(items: HarnessItem[], ctx?: AuditContext): AuditFindi
   };
   for (const item of items) {
     if (!item.active) continue;
-    const text = `${item.content}\n${item.evidence}`;
+    // Evidence is audited too (it can carry real claims), but migration
+    // provenance markers ("[migrated from pi-continual-harness]") are history,
+    // not dependencies — strip before matching.
+    const evidence = item.evidence.replace(/\[[^\]]*migrated[^\]]*\]/gi, "");
+    const text = `${item.content}\n${evidence}`;
     for (const p of missingPaths(text, ctx)) {
       push({ id: item.id, kind: item.kind, reason: "path-missing", detail: `${p} does not exist` });
     }

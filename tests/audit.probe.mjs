@@ -32,5 +32,27 @@ check("inactive items skipped", !findings.some((f) => f.id === "c_off"));
 const deltas = a.proposedDeltas(findings);
 check("one consolidated retire per item", deltas.length === 1 && deltas[0].op === "delete" && deltas[0].id === "c_stale" && deltas[0].reason.includes("path-missing") && deltas[0].reason.includes("package-absent"));
 
+// Project-local packages: cwd node_modules (+ parent for monorepos).
+const projDir = home + "/proj-a";
+mkdirSync(projDir + "/node_modules/@alrt/ui", { recursive: true });
+mkdirSync(home + "/node_modules/@monorepo/shared", { recursive: true });
+const projItems = [{ id: "c_proj", kind: "memory", active: true, content: "uses @alrt/ui and @monorepo/shared here", evidence: "", importance: 1, scope: "project", createdAt: 4, updatedAt: 4 }];
+const withoutCwd = a.auditItems(projItems, { home });
+const withCwd = a.auditItems(projItems, { home, cwd: projDir });
+check("project-local package flagged without cwd", withoutCwd.some((f) => f.id === "c_proj" && f.reason === "package-absent"));
+check("cwd node_modules clears the finding", !withCwd.some((f) => f.id === "c_proj"));
+check("parent node_modules clears monorepo packages", Array.isArray(withCwd) && withCwd.length === 0);
+
+// Typography tokens (@24/600) are not scoped packages.
+const typo = a.auditItems([{ id: "c_typo", kind: "memory", active: true, content: "SB Sans Display @24/600 weight", evidence: "", importance: 1, scope: "project", createdAt: 5, updatedAt: 5 }], { home });
+check("typography token not flagged", !typo.some((f) => f.reason === "package-absent"), JSON.stringify(typo));
+
+// Migration provenance in evidence is history, not a dependency...
+const prov = a.auditItems([{ id: "c_prov", kind: "memory", active: true, content: "record observations", evidence: "[migrated from pi-continual-harness] original note", importance: 1, scope: "project", createdAt: 6, updatedAt: 6 }], { home });
+check("migrated-from marker not flagged", !prov.some((f) => f.reason === "package-absent"), JSON.stringify(prov));
+// ...but a genuine claim in evidence still audits.
+const real = a.auditItems([{ id: "c_real", kind: "memory", active: true, content: "record observations", evidence: "installed as npm:pi-nonexistent-here", importance: 1, scope: "project", createdAt: 7, updatedAt: 7 }], { home });
+check("genuine evidence claim still flagged", real.some((f) => f.reason === "package-absent" && f.id === "c_real"));
+
 console.log(results.join("\n"));
 if (results.some((r) => r.startsWith("FAIL"))) process.exitCode = 1;
