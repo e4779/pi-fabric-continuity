@@ -119,14 +119,19 @@ function missingPackages(content: string, installed: Set<string>): string[] {
 export function auditItems(items: HarnessItem[], ctx?: AuditContext): AuditFinding[] {
   const installed = installedPackages(ctx);
   const findings: AuditFinding[] = [];
+  const seen = new Set<string>();
+  const push = (f: AuditFinding) => {
+    const key = `${f.id}|\u0000${f.reason}|\u0000${f.detail}`;
+    if (!seen.has(key)) { seen.add(key); findings.push(f); }
+  };
   for (const item of items) {
     if (!item.active) continue;
     const text = `${item.content}\n${item.evidence}`;
     for (const p of missingPaths(text, ctx)) {
-      findings.push({ id: item.id, kind: item.kind, reason: "path-missing", detail: `${p} does not exist` });
+      push({ id: item.id, kind: item.kind, reason: "path-missing", detail: `${p} does not exist` });
     }
     for (const name of missingPackages(text, installed)) {
-      findings.push({ id: item.id, kind: item.kind, reason: "package-absent", detail: `${name} not installed and not in the pi manifest` });
+      push({ id: item.id, kind: item.kind, reason: "package-absent", detail: `${name} not installed and not in the pi manifest` });
     }
   }
   return findings;
