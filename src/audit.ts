@@ -94,7 +94,7 @@ function missingPaths(content: string, ctx?: AuditContext): string[] {
   const missing: string[] = [];
   for (const raw of content.match(PATH_TOKEN_RE) ?? []) {
     const p = raw.replace(/[.,;:)\]]+$/, "");
-    if (p.includes("*")) continue;
+    if (p.includes("*") || p.includes("..")) continue; // globs and typographic ellipsis in stored prose
     // "~/.pi/..." style real anchors carry a directory segment; short bare
     // "~/x" tokens are almost always documentation examples, not anchors.
     const rel = p.startsWith("~") ? p.slice(2) : null;
