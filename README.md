@@ -1,5 +1,9 @@
 # pi-fabric-continuity
 
+[![npm](https://img.shields.io/npm/v/pi-fabric-continuity)](https://www.npmjs.com/package/pi-fabric-continuity)
+[![checks](https://github.com/e4779/pi-fabric-continuity/actions/workflows/ci.yml/badge.svg)](https://github.com/e4779/pi-fabric-continuity/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-ISC-blue.svg)](./LICENSE)
+
 Continual harness for [pi](https://github.com/earendil-works/pi-coding-agent), built on
 [pi-fabric](https://github.com/monotykamary/pi-fabric) primitives: self-improving prompt
 notes, principles, skill descriptions, and sub-agent specs — with a refine loop and
@@ -9,9 +13,44 @@ Successor to the pi-continual-harness concept, re-architected per
 [The Harness Playbook](https://stencil.so/blog/harness-playbook): one authority
 (an append-only journal), state derived by folding, /tree-correct trajectory reads.
 
+## How it fits
+
+The roles around the model boundary are deliberately separate:
+
+- **pi-fabric** executes and orchestrates; its compaction engine writes the deterministic summary.
+- **pi-context-engineer** decides what data may cross a single call boundary.
+- **pi-vcc** preserves the raw lineage that compaction removes.
+- **continuity** governs the identity boundary: which distilled claims about the operator, the
+  project and the harness itself ride into every system prompt — kept honest by a journaled,
+  evidence-backed self-improvement loop.
+
+## Lineage & inspirations
+
+- [The Continual Harness](https://arxiv.org/abs/2605.09998) — the four components
+  (prompt / memory / skill / subagent) this package implements.
+- [The Harness Playbook](https://stencil.so/blog/harness-playbook) — one authority, folding,
+  /tree-correct reads (already linked above; it shaped the architecture).
+- [prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) — the refine loop:
+  trajectory evidence → proposed deltas → journaled, revertible transitions.
+- ACE (Agentic Context Engineering) — structured, evidence-backed CRUD deltas instead of
+  prose rewrites; the `Delta` type is ACE-shaped on purpose.
+- [pi-vcc](https://github.com/monotykamary/pi-vcc) — sticky sections and stable-first
+  ordering; our emission order is prompt-cache-stable for the same reason.
+- [pi-context-engineer](https://github.com/p-yan-6908/pi-context-engineer) — boundary
+  governance; continuity extends that philosophy to the identity boundary.
+- [pi-reflect](https://www.npmjs.com/package/pi-reflect) and
+  [pi-mem](https://www.npmjs.com/package/pi-mem) — surveyed in
+  [docs/domain-map.md](docs/domain-map.md).
+
 ## Install
 
 Requires pi >= 0.85 with the pi-fabric extension installed.
+
+```bash
+pi install npm:pi-fabric-continuity
+```
+
+Or from the repo directly:
 
 ```bash
 pi install git:github.com/e4779/pi-fabric-continuity
@@ -116,4 +155,4 @@ tsc -p tsconfig.build.json && node tests/journal.probe.mjs && node tests/complet
 
 ## License
 
-[BSD-2-Clause](LICENSE) — the OpenBSD-style license.
+[ISC](LICENSE) — the OpenBSD-style license.

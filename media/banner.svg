@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="16" fill="url(#bg)"/>
+  <g stroke="url(#accent)" stroke-width="2" opacity="0.35" fill="none">
+    <path d="M60 60 C 300 20, 500 100, 740 60 S 1100 90, 1140 60"/>
+    <path d="M60 150 C 300 110, 500 190, 740 150 S 1100 180, 1140 150"/>
+    <path d="M60 240 C 300 200, 500 280, 740 240 S 1100 270, 1140 240"/>
+  </g>
+  <text x="600" y="128" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="56" font-weight="700" fill="#f1f5f9">pi-fabric-continuity</text>
+  <text x="600" y="176" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#94a3b8">a self-improving harness state, one append-only journal at a time</text>
+  <text x="600" y="216" text-anchor="middle" font-family="ui-monospace, monospace" font-size="16" fill="#64748b">create · refine · decay · search — never rewrite</text>
+</svg>

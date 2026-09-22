@@ -4,7 +4,15 @@
   "description": "Continual harness for pi on fabric primitives: provider-owned journal of self-improving notes/principles, exposed as the `continuity` FabricProvider and callable from fabric_exec.",
   "type": "module",
   "main": "./src/index.ts",
-  "keywords": ["pi-extension", "pi-package", "pi-fabric", "continual-harness", "self-improvement"],
+  "license": "ISC",
+  "image": "https://raw.githubusercontent.com/e4779/pi-fabric-continuity/main/media/banner.svg",
+  "files": [
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": ["pi-extension", "pi-package", "pi-fabric", "continual-harness", "self-improvement", "memory", "compaction"],
   "pi": {
     "extensions": [
       "./src/index.ts"
@@ -13,10 +21,12 @@
   "author": "e4779",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/e4779/pi-fabric-continuity.git"
+    "url": "git+https://github.com/e4779/pi-fabric-continuity.git"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "tsc -p tsconfig.build.json && cd tests && for p in journal audit inject completions delivery refine counters vcc search; do node $p.probe.mjs || exit 1; done"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.85.0",
