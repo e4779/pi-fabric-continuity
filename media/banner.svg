@@ -1,21 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="310" viewBox="0 0 1200 310" role="img" aria-labelledby="t d">
+  <title id="t">pi-fabric-continuity</title>
+  <desc id="d">A user note becomes an append-only journal of evidence-backed deltas, which folds into a bounded block inside the system prompt — create, refine, decay, search; the journal is never rewritten.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0f172a"/>
-      <stop offset="1" stop-color="#1e293b"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#38bdf8"/>
-      <stop offset="1" stop-color="#a78bfa"/>
-    </linearGradient>
+    <pattern id="warp" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M 36 0 H 0 V 36" fill="none" stroke="#21262d" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#8b949e"/>
+    </marker>
   </defs>
-  <rect width="1200" height="300" rx="16" fill="url(#bg)"/>
-  <g stroke="url(#accent)" stroke-width="2" opacity="0.35" fill="none">
-    <path d="M60 60 C 300 20, 500 100, 740 60 S 1100 90, 1140 60"/>
-    <path d="M60 150 C 300 110, 500 190, 740 150 S 1100 180, 1140 150"/>
-    <path d="M60 240 C 300 200, 500 280, 740 240 S 1100 270, 1140 240"/>
+
+  <rect width="1200" height="310" rx="14" fill="#0d1117"/>
+  <rect width="1200" height="310" rx="14" fill="url(#warp)" opacity="0.45"/>
+
+  <g filter="url(#glow)">
+    <text x="40" y="62" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="38" font-weight="700" fill="#c9d1d9">pi-fabric-continuity</text>
   </g>
-  <text x="600" y="128" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="56" font-weight="700" fill="#f1f5f9">pi-fabric-continuity</text>
-  <text x="600" y="176" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#94a3b8">a self-improving harness state, one append-only journal at a time</text>
-  <text x="600" y="216" text-anchor="middle" font-family="ui-monospace, monospace" font-size="16" fill="#64748b">create · refine · decay · search — never rewrite</text>
+  <text x="40" y="94" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#8b949e">a self-improving harness state, one append-only journal at a time</text>
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" dur="0.4s" begin="0.35s" fill="freeze"/>
+    <rect x="40" y="140" width="270" height="86" rx="10" fill="#161b22" stroke="#30363d"/>
+    <circle cx="58" cy="158" r="4" fill="#ff5f57" opacity="0.8"/>
+    <circle cx="74" cy="158" r="4" fill="#febc2e" opacity="0.8"/>
+    <circle cx="90" cy="158" r="4" fill="#28c840" opacity="0.8"/>
+    <text x="104" y="162" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#8b949e">operator note</text>
+    <text x="56" y="190" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-style="italic" fill="#c9d1d9">&#8220;ship the fix,</text>
+    <text x="56" y="210" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-style="italic" fill="#c9d1d9">not the doctrine&#8221;</text>
+  </g>
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="0.6s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" dur="0.4s" begin="0.6s" fill="freeze"/>
+    <line x1="316" y1="183" x2="382" y2="183" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+  </g>
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="0.7s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" dur="0.5s" begin="0.7s" fill="freeze"/>
+    <rect x="390" y="132" width="360" height="102" rx="10" fill="#161b22" stroke="#30363d"/>
+    <text x="406" y="156" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#8b949e">journal.jsonl · append-only · v42</text>
+    <text x="406" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#58a6ff">v40</text>
+    <text x="440" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c9d1d9">update c_mu5… evidence: probe 20KB ✓</text>
+    <text x="406" y="198" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#58a6ff">v41</text>
+    <text x="440" y="198" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c9d1d9">create c_abc1 evidence: field report</text>
+    <text x="406" y="218" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#3fb950">v42</text>
+    <text x="440" y="218" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#8b949e">delete c_x · audit: path-missing</text>
+  </g>
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="0.95s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" dur="0.4s" begin="0.95s" fill="freeze"/>
+    <line x1="756" y1="183" x2="822" y2="183" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+  </g>
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="1.05s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" dur="0.5s" begin="1.05s" fill="freeze"/>
+    <rect x="830" y="140" width="330" height="86" rx="10" fill="#161b22" stroke="#30363d"/>
+    <text x="846" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#8b949e">system prompt · every turn</text>
+    <text x="846" y="192" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#c9d1d9">Continuity harness state</text>
+    <text x="846" y="212" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#8b949e">+3 items · importance-ordered · ≤800 tok</text>
+  </g>
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.5s" begin="1.35s" fill="freeze"/>
+    <text x="600" y="272" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#8b949e">create · refine · decay · search — <tspan fill="#58a6ff">never rewrite</tspan></text>
+  </g>
 </svg>
