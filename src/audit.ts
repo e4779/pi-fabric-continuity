@@ -6,12 +6,14 @@
 //
 // Two check classes, both conservative (only concrete, anchored tokens):
 //   path-missing   — `~/…`, `/home/…`, `/Users/…` tokens that no longer
-//                    exist on disk (globs and URLs are skipped);
+//                    exist on disk (globs, URLs and sentence punctuation are
+//                    stripped before the check);
 //   package-absent — `npm:@scope/name`, `@scope/name`, `pi-name` tokens
-//                    absent from installed extensions (~/.pi/agent/npm) and
-//                    the pi manifest. Bare `pi-*` prose mentions can
-//                    false-positive (e.g. "consider pi-goal") — findings are
-//                    proposals for review, never silent deletes.
+//                    absent from pi-visible installs (npm tree, git-sourced
+//                    checkouts, global nvm tree) and the pi manifest. Bare
+//                    `pi-*` prose mentions can still false-positive (e.g.
+//                    "consider pi-goal") — findings are proposals for review,
+//                    never silent deletes.
 
 import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
@@ -41,20 +43,41 @@ export function homeDir(ctx?: AuditContext): string {
   return ctx?.home ?? os.homedir();
 }
 
-/** Package names visible to pi: ~/.pi/agent/npm/node_modules (+ manifest list). */
+function tryReaddir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Package names visible to pi: the npm-installed pi packages
+ * (~/.pi/agent/npm/node_modules), git-sourced checkouts
+ * (~/.pi/agent/git/<host>/<owner>/<repo>), the global nvm tree, plus any
+ * manifest names handed in.
+ */
 export function installedPackages(ctx?: AuditContext): Set<string> {
   const found = new Set<string>(ctx?.manifestPackages ?? []);
-  const nm = path.join(homeDir(ctx), ".pi", "agent", "npm", "node_modules");
-  try {
-    for (const entry of readdirSync(nm)) {
+  const home = homeDir(ctx);
+  const scanFlat = (dir: string) => {
+    for (const entry of tryReaddir(dir)) {
       if (entry.startsWith("@")) {
-        for (const sub of readdirSync(path.join(nm, entry))) found.add(`${entry}/${sub}`);
+        for (const sub of tryReaddir(path.join(dir, entry))) found.add(`${entry}/${sub}`);
       } else {
         found.add(entry);
       }
     }
-  } catch {
-    // No npm tree (fresh install / hermetic home) — manifest list only.
+  };
+  scanFlat(path.join(home, ".pi", "agent", "npm", "node_modules"));
+  const gitRoot = path.join(home, ".pi", "agent", "git");
+  for (const host of tryReaddir(gitRoot)) {
+    for (const owner of tryReaddir(path.join(gitRoot, host))) {
+      for (const repo of tryReaddir(path.join(gitRoot, host, owner))) found.add(repo);
+    }
+  }
+  for (const version of tryReaddir(path.join(home, ".nvm", "versions", "node"))) {
+    scanFlat(path.join(home, ".nvm", "versions", "node", version, "lib", "node_modules"));
   }
   return found;
 }
@@ -63,8 +86,12 @@ function missingPaths(content: string, ctx?: AuditContext): string[] {
   const home = homeDir(ctx);
   const missing: string[] = [];
   for (const raw of content.match(PATH_TOKEN_RE) ?? []) {
-    const p = raw.replace(/[.,;)]]+$/, "");
+    const p = raw.replace(/[.,;:)\]]+$/, "");
     if (p.includes("*")) continue;
+    // "~/.pi/..." style real anchors carry a directory segment; short bare
+    // "~/x" tokens are almost always documentation examples, not anchors.
+    const rel = p.startsWith("~") ? p.slice(2) : null;
+    if (rel !== null && !rel.includes("/") && rel.length <= 2) continue;
     const abs = p.startsWith("~") ? path.join(home, p.slice(1)) : p;
     if (!existsSync(abs)) missing.push(p);
   }
