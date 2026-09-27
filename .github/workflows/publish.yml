@@ -17,6 +17,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       # --access public: provenance requires it explicitly for new packages
+      # Trusted publishing (OIDC): no token secret; requires the package's
+      # Trusted Publisher on npmjs.com to point at this repo + workflow.
+      # NOTE: npm GATs with 2FA-bypass stop publishing directly Jan 2027.
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
