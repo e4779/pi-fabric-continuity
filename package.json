@@ -1,6 +1,6 @@
 {
   "name": "pi-fabric-continuity",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Continual harness for pi on fabric primitives: provider-owned journal of self-improving notes/principles, exposed as the `continuity` FabricProvider and callable from fabric_exec.",
   "type": "module",
   "main": "./src/index.ts",
@@ -31,5 +31,14 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.85.0",
     "pi-fabric": ">=0.82.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "pi-fabric": { "optional": true }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "pi-fabric": "npm:@e4779/pi-fabric@^0.96.4-fork.10",
+    "typescript": "^6.0.3"
   }
 }

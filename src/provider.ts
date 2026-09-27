@@ -4,16 +4,51 @@
 // validation, risk policy, nested-call audit, and cancellation.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  FABRIC_PROVIDER_DISCOVER_EVENT,
-  FABRIC_PROVIDER_REGISTER_EVENT,
-  type FabricActionDescriptor,
-  type FabricInvocationContext,
-  type FabricProvider,
-  type FabricProviderDiscovery,
-  type FabricProviderListRequest,
-  type FabricProviderRegistration,
+import type {
+  FabricActionDescriptor,
+  FabricInvocationContext,
+  FabricProvider,
+  FabricProviderDiscovery,
+  FabricProviderListRequest,
+  FabricProviderRegistration,
 } from "pi-fabric/protocol";
+
+// Runtime protocol values resolve resiliently: upstream installs expose
+// "pi-fabric/protocol"; fork installs ("@e4779/pi-fabric") may not provide the
+// unscoped alias, and pi installs peers with legacy-peer-deps semantics so the
+// peer never auto-arrives. Types stay static — only the two event-name
+// constants load at runtime, so a missing fabric peer fails with a clear
+// message instead of a cryptic MODULE_NOT_FOUND at extension load.
+interface FabricProtocolModule {
+  FABRIC_PROVIDER_DISCOVER_EVENT?: unknown;
+  FABRIC_PROVIDER_REGISTER_EVENT?: unknown;
+}
+
+async function loadProtocolModule(): Promise<FabricProtocolModule> {
+  for (const specifier of ["pi-fabric/protocol", "@e4779/pi-fabric/protocol"]) {
+    try {
+      const loaded: unknown = await import(specifier);
+      const candidate = (loaded !== null && typeof loaded === "object" && "default" in loaded
+        ? (loaded as { default: unknown }).default
+        : loaded) as FabricProtocolModule | null | undefined;
+      if (
+        typeof candidate?.FABRIC_PROVIDER_DISCOVER_EVENT === "string" &&
+        typeof candidate?.FABRIC_PROVIDER_REGISTER_EVENT === "string"
+      ) {
+        return candidate;
+      }
+    } catch {
+      // Fabric is an optional peer — try the next specifier.
+    }
+  }
+  throw new Error(
+    "pi-fabric-continuity: fabric protocol module not found — install pi-fabric (or alias it to the @e4779/pi-fabric fork)",
+  );
+}
+
+const protocol = await loadProtocolModule();
+const FABRIC_PROVIDER_DISCOVER_EVENT: string = protocol.FABRIC_PROVIDER_DISCOVER_EVENT as string;
+const FABRIC_PROVIDER_REGISTER_EVENT: string = protocol.FABRIC_PROVIDER_REGISTER_EVENT as string;
 import { appendDeltas, currentSnapshot, history, journalPath, moveItem, revertToVersion, splitByScope, validateDelta } from "./journal.js";
 import { auditItems, proposedDeltas } from "./audit.js";
 import { searchItems } from "./search.js";
