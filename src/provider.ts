@@ -54,7 +54,7 @@ import { auditItems, proposedDeltas } from "./audit.js";
 import { searchItems } from "./search.js";
 import { certifyItems } from "./certify.js";
 import { loadConfig } from "./config.js";
-import { readCounters, recordTouches, statsForItems } from "./counters.js";
+import { readCounters, statsForItems } from "./counters.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
 
 const scopeSchema = { type: "string", enum: ["project", "global"], default: "project" };
@@ -111,7 +111,7 @@ function descriptors(): FabricActionDescriptor[] {
     },
     {
       name: "stats",
-      description: "Attribution counters per item: injections into the system prompt, touches (continuity.mutate transition or /harness keep), last injection time; decay-eligible items flagged.",
+      description: "Attribution counters per item: injections into the system prompt, confirms (the refine proposer re-targeted the item — the decay counterweight), last injection time; decay-eligible items flagged.",
       risk: "read",
       inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str }, additionalProperties: false },
     },
@@ -237,12 +237,10 @@ function makeProvider(): FabricProvider {
           const moves = deltas.filter((d) => (d as { op?: string }).op === "move");
           const rest = deltas.filter((d) => (d as { op?: string }).op !== "move");
           const moved = [] as Array<{ id: string; from: string | null; to: string; moved: boolean }>;
-          const touched: string[] = [];
           for (const m of moves) {
             const mv = m as { id: string; to: Scope };
             const r = await moveItem({ cwd, id: mv.id, to: mv.to, actor });
             moved.push({ id: mv.id, from: r.from, to: mv.to, moved: r.moved });
-            if (r.moved) touched.push(mv.id);
           }
           let applied = 0;
           let version = (await currentSnapshot(scope, cwd)).version;
@@ -251,16 +249,8 @@ function makeProvider(): FabricProvider {
             if (group.length === 0) continue;
             const out = await appendDeltas({ scope: targetScope, cwd, actor, source, deltas: group });
             applied += out.transitions.length;
-            touched.push(...out.transitions.map((t) => t.target).filter((t): t is string => typeof t === "string"));
             if (targetScope === scope) version = out.snapshot.version;
             routed.push(`${group.length}->${targetScope}`);
-          }
-          // F1.2: acting on an item through mutate counts as a touch. The
-          // counters file is derived state — never fail a journaled mutate.
-          try {
-            await recordTouches(touched);
-          } catch {
-            // Counters unavailable — the journal write stands.
           }
           return { applied, version, routed, moved };
         }

@@ -22,6 +22,9 @@ check("parse: empty -> null", c.parseProposerOutput("") === null);
 const wrapped = c.parseProposerOutput('Here you go: {"deltas":[{"op":"delete","id":"c_1","reason":"stale"}]} hope this helps');
 check("parse: json embedded in prose", wrapped !== null && wrapped.deltas[0].op === "delete");
 
+// v0.5: the proposer is taught the confirmation bump rule (two-sided refine)
+check("prompt: bump rule instructed", typeof c.PROPOSER_SYSTEM === "string" && c.PROPOSER_SYSTEM.includes("RE-CONFIRMS") && c.PROPOSER_SYSTEM.includes("re-confirmed"));
+
 // gatherEvidence
 const fakeBranch = [
   { type: "custom", customType: "noise" },

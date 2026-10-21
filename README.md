@@ -84,7 +84,8 @@ cover the rest with full journal provenance.)
 `continuity.search` is the same search as `/harness search` as a read-risk
 action: `{ query, scope?, cwd? }` — literal, case-insensitive, no LLM.
 `continuity.stats` is the read-risk view behind `/harness stats`: per-item
-injection/touch counters with decay eligibility (see F1 attribution counters).
+injection/confirm counters with decay eligibility (attribution = the refine
+cycle; see the Attribution section).
 `continuity.certify` (execute-risk) runs every active item's `evidenceCmds`
 fail-closed (non-zero exit or timeout = violated) and appends certify deltas;
 the fold exposes `item.cert = { status, at, digest }`, and injected lines gain
@@ -111,16 +112,38 @@ proceeds unchanged.
 
 Three roles, one journal:
 
-1. **Refine** — every N turns (opt-in `autoRefine`) or on demand (`/harness refine`),
+1. **Refine** — every N turns (opt-in `autoRefine`) or on demand (`/refine <lookback>`),
    the pipeline reads the recent trajectory and proposes evidence-backed deltas.
    Repeated patterns, durable facts, and stale items become journal transitions.
 2. **The model self-corrects** — active items are injected into the system prompt
    each turn (importance-ordered, token-budgeted). When the model notices an item
    is wrong or stale mid-session, it updates it directly via `continuity.mutate`
    from any fabric_exec program — no waiting for the human.
-3. **You curate** — `/harness keep`/`drop` to steer importance, `/harness history`
-   to audit who changed what and why, `/harness revert <v>` to undo a bad refine.
-   Every mutation is journaled; nothing happens outside the audit trail.
+3. **You curate** — by asking the agent ("разбери заметки", "удали протухшее",
+   "проверь факты"); the agent goes through the journaled provider
+   (`continuity.list/search/audit/certify/revert`). Every mutation is
+   journaled; nothing happens outside the audit trail.
+
+## Attribution (v0.5 — honest semantics)
+
+"A note must earn its tokens." Two counters, one loop:
+
+- **injections** — exposure: how often the item rode into the system prompt.
+- **confirms** — the working attribution signal: how often a refine run
+  re-targeted the item (an update/delete in the proposer's batch, or an
+  explicit importance bump citing re-confirmation in the trajectory).
+- **Decay is two-sided now**: unconfirmed items at the injection threshold
+  drop one importance tier per refine run; the proposer is instructed to bump
+  (+0.05..0.10, cap 0.90) items whose facts prove useful again. Forgetting and
+  re-confirmation balance each other through the same journaled mechanism.
+- The old **touches** counter (main-model self-report / mutate curation) was
+  removed: models never self-report note usage — the signal measured nothing
+  (verified 2026-10-21: 0 touches across 70 global items, ever). Legacy
+  counters files read tolerantly; the dead field is ignored.
+
+This matches the prime-agent Continual Harness model: attribution is the
+distillation cycle itself — a fact that keeps shaping trajectories keeps
+re-appearing in the proposer's evidence.
 
 Scopes: `project` per working directory (default) and `global` for cross-project
 principles. The refine proposer decides per delta (it sees both stores and the

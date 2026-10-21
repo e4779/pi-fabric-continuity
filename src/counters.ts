@@ -1,13 +1,15 @@
 // Attribution counters — "a note must earn its tokens" (spec F1).
 // injections: how often an item was rendered into the system prompt (F1.1,
-// recorded by the injector). touches: how often the model or operator acted
-// on it — a continuity.mutate transition targeting the item, or /harness
-// keep (F1.2). Counters live in a derived cache keyed by item id (ids are
-// stable across moves and refolds) and survive restarts (F1.5);
-// read-modify-write cycles take the journal's inter-process lock.
-// Decay (F1.4): an ACTIVE item that reached the injection threshold with zero
-// touches is a decay candidate — refine proposes an importance decrease with
-// the counters as evidence, journaled like every refine delta.
+// recorded by the injector). confirms: how often a refine run re-targeted the
+// item (the proposer emitted an update/delete for it) — the working
+// attribution signal, per the prime-agent model: a fact that keeps shaping
+// trajectories keeps re-appearing in the proposer's evidence.
+// v0.5 honesty note: the old "touches" counter (main-model self-report /
+// mutate curation) measured nothing in practice — models never self-report
+// note usage — and was removed. Decay (F1.4): an ACTIVE item at the injection
+// threshold with zero confirms decays one tier per refine run. Counters live
+// in a derived cache keyed by item id; legacy files with a "touches" field
+// read tolerantly (unknown fields are ignored).
 
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -18,7 +20,7 @@ import type { Delta, HarnessItem } from "./types.js";
 
 export interface ItemCounters {
   injections: number;
-  touches: number;
+  confirms: number;
   lastInjectedAt?: number;
 }
 
@@ -30,7 +32,7 @@ interface CountersFile {
 export interface ItemStats {
   id: string;
   injections: number;
-  touches: number;
+  confirms: number;
   lastInjectedAt: number | null;
   decayEligible: boolean;
 }
@@ -46,7 +48,7 @@ function normalize(c: unknown): ItemCounters {
   const r = (c ?? {}) as Partial<ItemCounters>;
   return {
     injections: typeof r.injections === "number" && r.injections > 0 ? Math.floor(r.injections) : 0,
-    touches: typeof r.touches === "number" && r.touches > 0 ? Math.floor(r.touches) : 0,
+    confirms: typeof r.confirms === "number" && r.confirms > 0 ? Math.floor(r.confirms) : 0,
     ...(typeof r.lastInjectedAt === "number" ? { lastInjectedAt: r.lastInjectedAt } : {}),
   };
 }
@@ -79,13 +81,13 @@ export async function recordInjections(ids: readonly string[], ts: number = Date
   await mutateCounters((counters) => {
     for (const id of uniq) {
       const c = normalize(counters[id]);
-      counters[id] = { injections: c.injections + 1, touches: c.touches, lastInjectedAt: ts };
+      counters[id] = { injections: c.injections + 1, confirms: c.confirms, lastInjectedAt: ts };
     }
   });
 }
 
-/** F1.2: one touch for each item the model or operator acted on. */
-export async function recordTouches(ids: readonly string[]): Promise<void> {
+/** v0.5: one confirm for each item a refine proposer re-targeted. */
+export async function recordConfirms(ids: readonly string[]): Promise<void> {
   const uniq = [...new Set(ids)];
   if (uniq.length === 0) return;
   await mutateCounters((counters) => {
@@ -93,20 +95,20 @@ export async function recordTouches(ids: readonly string[]): Promise<void> {
       const c = normalize(counters[id]);
       counters[id] = {
         injections: c.injections,
-        touches: c.touches + 1,
+        confirms: c.confirms + 1,
         ...(c.lastInjectedAt !== undefined ? { lastInjectedAt: c.lastInjectedAt } : {}),
       };
     }
   });
 }
 
-/** F1.4: an active item at/over the threshold with zero touches. */
+/** F1.4: an active item at/over the threshold with zero confirms. */
 export function isDecayEligible(
   item: HarnessItem,
   c: ItemCounters | undefined,
   afterInjections: number = DEFAULT_DECAY_AFTER_INJECTIONS,
 ): boolean {
-  return item.active && (c?.injections ?? 0) >= afterInjections && (c?.touches ?? 0) === 0;
+  return item.active && (c?.injections ?? 0) >= afterInjections && (c?.confirms ?? 0) === 0;
 }
 
 /** F1.3: per-item stats over folded items; ids without a record read as zeros. */
@@ -120,7 +122,7 @@ export function statsForItems(
     return {
       id: i.id,
       injections: c?.injections ?? 0,
-      touches: c?.touches ?? 0,
+      confirms: c?.confirms ?? 0,
       lastInjectedAt: c?.lastInjectedAt ?? null,
       decayEligible: isDecayEligible(i, c, afterInjections),
     };
@@ -141,7 +143,7 @@ export function decayProposals(
     const importance = Math.round(it.importance * DECAY_IMPORTANCE_FACTOR * 100) / 100;
     if (importance >= it.importance) continue;
     const last = c.lastInjectedAt !== undefined ? new Date(c.lastInjectedAt).toISOString() : "never";
-    const evidence = `decay: ${c.injections} injections, 0 touches (threshold ${afterInjections}); last injected ${last}; importance ${it.importance.toFixed(2)} -> ${importance.toFixed(2)}`;
+    const evidence = `decay: ${c.injections} injections, 0 confirms (threshold ${afterInjections}); last injected ${last}; importance ${it.importance.toFixed(2)} -> ${importance.toFixed(2)}`;
     out.push({ op: "update", id: it.id, importance, evidence, scope: it.scope });
   }
   return out;

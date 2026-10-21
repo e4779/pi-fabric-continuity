@@ -7,7 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { decayProposals, readCounters } from "./counters.js";
+import { decayProposals, readCounters, recordConfirms } from "./counters.js";
 import {
   DEFAULT_LOOKBACK_TURNS,
   PROPOSER_SYSTEM,
@@ -41,12 +41,13 @@ export interface RefineResult {
   version: number;
   /** F1.4: decay proposals journaled this run (importance decreases). */
   decay?: number;
+  /** v0.5: items the proposer re-targeted (update/delete) this run. */
+  confirmed?: number;
   skipped?: string;
 }
 
 /** Bump when refine behavior changes; appears in last-refine.log. */
-/** Bump when refine behavior changes; appears in last-refine.log. */
-const REFINE_LOG_VERSION = 6;
+const REFINE_LOG_VERSION = 7;
 
 /** Reasoning models spend output budget on thinking before emitting text:
  *  a 4k ceiling let glm-5.3 burn the whole budget and return zero text
@@ -133,6 +134,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     parsedOk: parsed !== null,
     proposedCount: parsed?.deltas.length ?? 0,
     appliedCount: deltas.length,
+    confirmedCount: deltas.filter((d) => d.op === "update" || d.op === "delete").length,
     liveRunsAtLogTime: activeRuns,
   });
 
@@ -161,9 +163,25 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       });
     }
   }
+  // v0.5 attribution: items the proposer chose to act on (update/delete)
+  // are re-confirmed by this trajectory. Recorded BEFORE decay evaluates, so
+  // a just-confirmed item never decays in the same run. Counters are derived
+  // state — a failure here must never fail the journaled deltas.
+  const targeted = [...new Set(deltas
+    .filter((d) => (d.op === "update" || d.op === "delete") && typeof (d as { id?: unknown }).id === "string")
+    .map((d) => (d as { id: string }).id))];
+  let confirmed = 0;
+  if (targeted.length > 0) {
+    try {
+      await recordConfirms(targeted);
+      confirmed = targeted.length;
+    } catch {
+      // Counters unavailable — the journal writes stand.
+    }
+  }
   // F1.4: attribution decay — active items that burned their injection budget
-  // without a single touch drop one importance tier. Deterministic proposals,
-  // journaled like every refine delta (no silent writes).
+  // without ever being re-confirmed by a refine run drop one importance tier.
+  // Deterministic proposals, journaled like every refine delta (no silent writes).
   let decay = 0;
   try {
     const counters = await readCounters();
@@ -193,8 +211,8 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
         ? "proposer output truncated at the token ceiling — no deltas applied"
         : "proposer output unparseable — no deltas applied"
       : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
-  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${decay > 0 ? `, ${decay} decay` : ""}${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
-  return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version, ...(decay > 0 ? { decay } : {}) };
+  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${confirmed > 0 ? `, ${confirmed} confirmed` : ""}${decay > 0 ? `, ${decay} decay` : ""}${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
+  return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version, ...(confirmed > 0 ? { confirmed } : {}), ...(decay > 0 ? { decay } : {}) };
 }
 
 // turn_end cadence — module state, reset on session_start.

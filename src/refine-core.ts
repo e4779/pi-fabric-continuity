@@ -29,6 +29,7 @@ Rules (ACE-style, strictly):
 - Itemized deltas only; never rewrite or expand whole items.
 - Every create cites evidence: quote or precisely reference the trajectory.
 - Prefer updating an existing item over creating a near-duplicate; delete only with a concrete reason (stale, wrong, superseded).
+- When trajectory evidence RE-CONFIRMS an existing item (its fact or lesson proved useful again — cite how), propose a small importance bump: {"op":"update","id":"...","importance":<current + 0.05..0.10, at most 0.90>,"evidence":"re-confirmed: ..."}. Confirmation is the counterweight to decay: items the refine cycle keeps confirming stay alive; unconfirmed ones slowly decay.
 - importance in [0,1] estimates future usefulness; keep nudges small.
 - If nothing is clearly warranted, return an empty deltas array.
 - "Operator instructions" in the user message are binding directives from the human operator for this run: when they name a policy, fact, or preference to record, emit the corresponding create/update delta in this response unless it clearly contradicts the evidence.
