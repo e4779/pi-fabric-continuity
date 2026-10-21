@@ -8,6 +8,9 @@ export type ComponentKind = "prompt" | "memory" | "skill" | "subagent";
 
 export type Scope = "project" | "global";
 
+/** F4.1: outcome of running an item's evidenceCmds (fail-closed). */
+export type CertStatus = "certified" | "violated";
+
 /** A single item in the harness journal's derived state. */
 export interface HarnessItem {
   id: string;
@@ -23,6 +26,10 @@ export interface HarnessItem {
   scope: Scope;
   /** Optional relevance hint ("provider/id"). Never ownership, never a blank-slate reset. */
   models?: string[];
+  /** F4.1: optional machine-verifiable evidence commands (certify runs them). */
+  evidenceCmds?: string[];
+  /** F4.1: latest certification outcome, folded from certify deltas. */
+  cert?: { status: CertStatus; at: number; digest?: string };
   createdAt: number;
   updatedAt: number;
 }
@@ -36,6 +43,7 @@ export type Delta =
       evidence: string;
       importance?: number;
       models?: string[];
+      evidenceCmds?: string[];
       scope?: Scope;
       /** Explicit id (moves/migrations); server-generated when omitted. */
       id?: string;
@@ -48,10 +56,12 @@ export type Delta =
       importance?: number;
       active?: boolean;
       models?: string[];
+      evidenceCmds?: string[];
       scope?: Scope;
     }
   | { op: "delete"; id: string; reason: string; scope?: Scope }
-  | { op: "move"; id: string; to: Scope; reason?: string };
+  | { op: "move"; id: string; to: Scope; reason?: string }
+  | { op: "certify"; id: string; status: CertStatus; digest?: string; scope?: Scope };
 
 export type DeltaSource = "manual" | "refine" | "migrate";
 

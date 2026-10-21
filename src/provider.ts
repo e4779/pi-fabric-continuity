@@ -52,6 +52,7 @@ const FABRIC_PROVIDER_REGISTER_EVENT: string = protocol.FABRIC_PROVIDER_REGISTER
 import { appendDeltas, currentSnapshot, history, journalPath, moveItem, revertToVersion, splitByScope, validateDelta } from "./journal.js";
 import { auditItems, proposedDeltas } from "./audit.js";
 import { searchItems } from "./search.js";
+import { certifyItems } from "./certify.js";
 import { loadConfig } from "./config.js";
 import { readCounters, recordTouches, statsForItems } from "./counters.js";
 import type { ComponentKind, Delta, Scope } from "./types.js";
@@ -101,6 +102,12 @@ function descriptors(): FabricActionDescriptor[] {
       description: "Deterministic staleness check: verify active items' path and package references against the live machine. Read-only proposals; apply deletes via mutate.",
       risk: "read",
       inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str }, additionalProperties: false },
+    },
+    {
+      name: "certify",
+      description: "Run each active item's evidenceCmds (fail-closed: non-zero exit or timeout = violated) and journal certify deltas. Returns meshEvents for an optional guest-side mirror: publish each to mesh topic continuity.certification.",
+      risk: "execute",
+      inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str, timeoutMs: { type: "number" } }, additionalProperties: false },
     },
     {
       name: "stats",
@@ -192,6 +199,11 @@ function makeProvider(): FabricProvider {
           const globalSnap = await currentSnapshot("global", cwd);
           const findings = auditItems([...globalSnap.items, ...snap.items], { cwd });
           return { findings, proposed: proposedDeltas(findings) };
+        }
+        case "certify": {
+          const timeoutMs =
+            typeof args.timeoutMs === "number" && args.timeoutMs > 0 ? Math.floor(args.timeoutMs) : undefined;
+          return await certifyItems({ scope, cwd, actor, timeoutMs });
         }
         case "stats": {
           const snap = await currentSnapshot(scope, cwd);

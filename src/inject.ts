@@ -68,6 +68,14 @@ export function selectForInjection(items: HarnessItem[], modelKey: string | unde
 /** Render the block from an explicit selection — split from
  *  selectForInjection so the injector can record exactly the injected ids
  *  (F1.1) without selecting twice. */
+/** F4.2: freshness tag for certified/violated items (bounded, ASCII-safe). */
+function certTag(i: HarnessItem): string {
+  if (!i.cert) return "";
+  const mins = Math.max(1, Math.round((Date.now() - i.cert.at) / 60000));
+  const rel = mins < 60 ? `${mins}m` : mins < 2880 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)}d`;
+  return i.cert.status === "certified" ? ` [certified ${rel} ago]` : ` [VIOLATED ${rel} ago]`;
+}
+
 export function renderSelectedBlock(selected: HarnessItem[], omitted: number): string {
   if (selected.length === 0) return "";
   const sections: string[] = [];
@@ -78,7 +86,7 @@ export function renderSelectedBlock(selected: HarnessItem[], omitted: number): s
       .filter((i) => i.kind === kind)
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     if (forKind.length === 0) continue;
-    const bullets = forKind.map((i) => `- [${i.id}] ${i.content}`).join("\n");
+    const bullets = forKind.map((i) => `- [${i.id}] ${i.content}${certTag(i)}`).join("\n");
     sections.push(`### ${TITLES[kind]}\n${bullets}`);
   }
   if (sections.length === 0) return "";

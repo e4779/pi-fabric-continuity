@@ -8,20 +8,21 @@ import { runRefine } from "./refine.js";
 import { lastKnownSessionCwd, sessionCwdOf } from "./session-cwd.js";
 import { auditItems, proposedDeltas } from "./audit.js";
 import { searchItems } from "./search.js";
+import { certifyItems } from "./certify.js";
 import { loadConfig } from "./config.js";
 import { readCounters, recordTouches, statsForItems } from "./counters.js";
 import type { Delta, HarnessItem, Scope } from "./types.js";
 
 export function registerHarnessCommand(pi: ExtensionAPI): void {
   pi.registerCommand("harness", {
-    description: "continuity: status | list | search <query> | stats | history [n] | refine [lookback] | audit [--apply] | keep/drop <id> | move <id> <scope> | revert <version>",
+    description: "continuity: status | list | search <query> | stats | history [n] | refine [lookback] | audit [--apply] | certify [global] | keep/drop <id> | move <id> <scope> | revert <version>",
     // TUI contract: applyCompletion replaces the ENTIRE argument text with the
     // accepted item's value, so multi-word suggestions must repeat the
     // subcommand in value ("keep <id>", "list <kind>", "revert <version>").
     getArgumentCompletions: (argumentPrefix: string) => {
       const arg = argumentPrefix.trimStart();
       if (!arg.includes(" ")) {
-        const subs = ["status", "list", "search", "stats", "history", "refine", "audit", "keep", "drop", "move", "revert"]
+        const subs = ["status", "list", "search", "stats", "history", "refine", "audit", "certify", "keep", "drop", "move", "revert"]
           .filter((s) => s.startsWith(arg))
           .map((s) => ({ value: s, label: s }));
         return subs.length > 0 ? subs : null;
@@ -179,6 +180,22 @@ export function registerHarnessCommand(pi: ExtensionAPI): void {
           applied += out.transitions.length;
         }
         await ctx.ui.notify(`continuity audit: retired ${applied} item(s) (revert via /harness history)`, "info");
+        return;
+      }
+      if (sub === "certify") {
+        const scope: Scope = parts.includes("global") ? "global" : "project";
+        try {
+          const out = await certifyItems({ scope, cwd, actor: "command:harness" });
+          const done = out.results.filter((r) => r.status !== "skipped");
+          const skipped = out.results.length - done.length;
+          const lines = done.map(
+            (r) => `[${r.id}] ${r.status === "certified" ? "⚡" : "⚠"} ${r.status}${r.error ? " — " + r.error.slice(0, 120) : ""}`,
+          );
+          const header = `continuity certify (${scope}) — v${out.version}, ${out.applied} delta(s), ${done.length} verified, ${skipped} unverifiable`;
+          await ctx.ui.notify(done.length ? [header, ...lines].join("\n") : header + ": no verifiable items", "info");
+        } catch (err) {
+          await ctx.ui.notify(`continuity certify failed: ${String(err)}`, "warning");
+        }
         return;
       }
       if (sub === "list") {

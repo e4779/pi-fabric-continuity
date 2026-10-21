@@ -3,7 +3,7 @@
 // Storage layout: ~/.pi/agent/continuity/global/journal.jsonl and
 // ~/.pi/agent/continuity/projects/<slug>/journal.jsonl (slug from cwd).
 
-import { appendFile, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";
@@ -32,6 +32,14 @@ function genId(): string {
   return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** F4.1: evidenceCmds must be an array of non-empty strings (empty = none). */
+function validateEvidenceCmds(v: unknown): string | null {
+  if (v === undefined) return null;
+  if (!Array.isArray(v)) return "evidenceCmds must be an array of strings";
+  if (v.some((c) => typeof c !== "string" || !c.trim())) return "evidenceCmds must contain only non-empty strings";
+  return null;
+}
+
 /** Validate one delta; returns an error string or null. */
 export function validateDelta(d: unknown): string | null {
   if (typeof d !== "object" || d === null) return "delta must be an object";
@@ -48,12 +56,16 @@ export function validateDelta(d: unknown): string | null {
     if (!KINDS.includes(rec.kind as ComponentKind)) return "create.kind must be one of prompt|memory|skill|subagent";
     if (typeof rec.content !== "string" || !rec.content.trim()) return "create.content required";
     if (typeof rec.evidence !== "string" || !rec.evidence.trim()) return "create.evidence required";
+    const ecErr = validateEvidenceCmds(rec.evidenceCmds);
+    if (ecErr) return "create." + ecErr;
     return null;
   }
   if (rec.op === "update") {
     if (typeof rec.id !== "string" || !rec.id) return "update.id required";
-    const has = ["content", "evidence", "importance", "active", "models"].some((k) => rec[k] !== undefined);
-    if (!has) return "update needs at least one of content|evidence|importance|active|models";
+    const has = ["content", "evidence", "importance", "active", "models", "evidenceCmds"].some((k) => rec[k] !== undefined);
+    if (!has) return "update needs at least one of content|evidence|importance|active|models|evidenceCmds";
+    const ecErr2 = validateEvidenceCmds(rec.evidenceCmds);
+    if (ecErr2) return "update." + ecErr2;
     return null;
   }
   if (rec.op === "delete") {
@@ -61,7 +73,12 @@ export function validateDelta(d: unknown): string | null {
     if (typeof rec.reason !== "string" || !rec.reason.trim()) return "delete.reason required";
     return null;
   }
-  return "delta.op must be create|update|delete";
+  if (rec.op === "certify") {
+    if (typeof rec.id !== "string" || !rec.id) return "certify.id required";
+    if (rec.status !== "certified" && rec.status !== "violated") return "certify.status must be certified|violated";
+    return null;
+  }
+  return "delta.op must be create|update|delete|move|certify";
 }
 
 /** Apply one delta to the fold state. Returns the touched item id, when resolvable.
@@ -80,6 +97,7 @@ function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, s
       active: true,
       scope,
       ...(delta.models ? { models: delta.models } : {}),
+      ...(delta.evidenceCmds ? { evidenceCmds: delta.evidenceCmds } : {}),
       createdAt: ts,
       updatedAt: ts,
     });
@@ -93,7 +111,14 @@ function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, s
     if (delta.importance !== undefined) it.importance = clamp01(delta.importance, it.importance);
     if (delta.active !== undefined) it.active = delta.active;
     if (delta.models !== undefined) it.models = delta.models;
+    if (delta.evidenceCmds !== undefined) it.evidenceCmds = delta.evidenceCmds;
     it.updatedAt = ts;
+    return it.id;
+  }
+  if (delta.op === "certify") {
+    const it = items.get(delta.id);
+    if (!it) return null;
+    it.cert = { status: delta.status, at: ts, ...(delta.digest ? { digest: delta.digest } : {}) };
     return it.id;
   }
   return items.delete(delta.id) ? delta.id : null;
@@ -181,7 +206,51 @@ export async function readTransitions(path: string): Promise<Transition[]> {
   return out;
 }
 
+/** F4.3: a torn tail is a last line WITHOUT a trailing newline that fails to
+ *  parse — the signature of a write cut mid-line by a crash (power loss,
+ *  SIGKILL). Complete-but-invalid lines keep the skip behavior: never healed,
+ *  never rewritten. (Port of prime-agent #3387 discipline to our JSONL.) */
+function tailIsTorn(raw: string): boolean {
+  if (raw === "" || raw.endsWith("\n")) return false;
+  const tail = raw.slice(raw.lastIndexOf("\n") + 1).trim();
+  if (tail === "") return false;
+  try {
+    const t = JSON.parse(tail) as Transition;
+    return !(t && typeof t.version === "number" && t.delta);
+  } catch {
+    return true;
+  }
+}
+
+/** Heal under an ALREADY-HELD journal lock. Re-reads and re-checks, so a
+ *  writer that completed the line after our first look wins — valid data is
+ *  never truncated. Returns healed: false when the tail is fine. */
+async function healTailInPlace(path: string): Promise<{ healed: boolean; droppedBytes?: number }> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return { healed: false };
+  }
+  if (!tailIsTorn(raw)) return { healed: false };
+  const cut = raw.lastIndexOf("\n") + 1;
+  await writeFile(path, raw.slice(0, cut), "utf8");
+  return { healed: true, droppedBytes: raw.length - cut };
+}
+
+/** Locking wrapper for read paths (currentSnapshot). Never throws: healing
+ *  is best-effort recovery, and reads must work even when the lock is busy. */
+export async function healJournalTail(path: string): Promise<{ healed: boolean; droppedBytes?: number }> {
+  try {
+    return await withJournalLock(path, () => healTailInPlace(path));
+  } catch {
+    return { healed: false };
+  }
+}
+
 export async function currentSnapshot(scope: Scope, cwd?: string): Promise<JournalSnapshot> {
+  // F4.3: cut a crash-torn tail before folding (no-op for healthy journals).
+  await healJournalTail(journalPath(scope, cwd));
   const transitions = await readTransitions(journalPath(scope, cwd));
   const items = new Map<string, HarnessItem>();
   let version = 0;
@@ -251,6 +320,7 @@ export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> 
 }
 
 async function appendDeltasLocked(opts: AppendOptions, path: string): Promise<AppendOutcome> {
+  await healTailInPlace(path); // we hold the lock — heal before folding
   const existing = await readTransitions(path);
   let version = existing.reduce((m, t) => Math.max(m, t.version), 0);
   const items = new Map<string, HarnessItem>();

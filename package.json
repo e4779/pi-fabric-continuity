@@ -1,6 +1,6 @@
 {
   "name": "pi-fabric-continuity",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Continual harness for pi on fabric primitives: provider-owned journal of self-improving notes/principles, exposed as the `continuity` FabricProvider and callable from fabric_exec.",
   "type": "module",
   "main": "./src/index.ts",
@@ -26,19 +26,19 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsc -p tsconfig.build.json && cd tests && for p in journal audit inject completions delivery refine counters vcc search; do node $p.probe.mjs || exit 1; done"
+    "test": "tsc -p tsconfig.build.json && cd tests && for p in journal audit certify inject completions delivery refine counters vcc search; do node $p.probe.mjs || exit 1; done"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.85.0",
-    "pi-fabric": ">=0.82.0"
+    "@earendil-works/pi-coding-agent": ">=1.0.0",
+    "pi-fabric": ">=0.117.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": { "optional": true },
     "pi-fabric": { "optional": true }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.87.1",
-    "pi-fabric": "npm:@e4779/pi-fabric@^0.96.4-fork.10",
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "pi-fabric": "npm:@e4779/pi-fabric@^0.117.2-fork.28",
     "typescript": "^6.0.3"
   }
 }

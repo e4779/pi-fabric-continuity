@@ -44,7 +44,7 @@ The roles around the model boundary are deliberately separate:
 
 ## Install
 
-Requires pi >= 0.85 with the pi-fabric extension installed.
+Requires pi >= 1.0 with the pi-fabric extension installed.
 
 ```bash
 pi install npm:pi-fabric-continuity
@@ -72,6 +72,7 @@ ln -s ~/projects/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuit
                           # AND historical journal text (old versions, deleted);
                           # hits carry id, version/ts, bounded snippet
 /harness audit [--apply]   # deterministic staleness check: paths/packages vs the live machine
+/harness certify [global]  # run items' evidenceCmds (fail-closed) and journal the outcome
 /harness history [n]       # recent journal transitions (who/when/why)
 /harness refine [lookback] [instructions]
                           # trajectory evidence -> LLM proposer -> journaled deltas;
@@ -91,12 +92,21 @@ fabric-side validation, risk policy, and nested-call audit.
 action: `{ query, scope?, cwd? }` — literal, case-insensitive, no LLM.
 `continuity.stats` is the read-risk view behind `/harness stats`: per-item
 injection/touch counters with decay eligibility (see F1 attribution counters).
+`continuity.certify` (execute-risk) runs every active item's `evidenceCmds`
+fail-closed (non-zero exit or timeout = violated) and appends certify deltas;
+the fold exposes `item.cert = { status, at, digest }`, and injected lines gain
+a freshness tag (`[certified 2m ago]` / `[VIOLATED 3h ago]`). It also returns
+ready-to-publish `meshEvents` for an optional guest-side mirror:
+`for (const e of out.meshEvents) await mesh.publish(e);` — durable note-health
+events on the `continuity.certification` topic, visible to sub-agents and
+peers without loading this plugin.
 
 Auto-refine cadence and refine evidence (opt-in):
 
 ```json
 // ~/.pi/agent/continuity/config.json
-{ "autoRefine": { "enabled": true, "everyTurns": 50 }, "vccEvidence": false }
+{ "autoRefine": { "enabled": true, "everyTurns": 50 }, "vccEvidence": false,
+  "certify": { "timeoutMs": 10000 } }
 ```
 
 `"vccEvidence": true` feeds the refine proposer a bounded, labeled section of

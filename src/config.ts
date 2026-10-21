@@ -17,15 +17,20 @@ export interface ContinuityConfig {
   decayAfterInjections: number;
   /** F2.1: collect bounded vcc_recall evidence during refine (default false). */
   vccEvidence: boolean;
+  /** F4.1: per-command execution budget for certify. */
+  certify: { timeoutMs: number };
 }
 
 /** F1.4 — DECAY_AFTER_INJECTIONS from the spec. */
 export const DEFAULT_DECAY_AFTER_INJECTIONS = 20;
 
+export const DEFAULT_CERTIFY_TIMEOUT_MS = 10_000;
+
 export const DEFAULT_CONFIG: ContinuityConfig = {
   autoRefine: { enabled: false, everyTurns: 50 },
   decayAfterInjections: DEFAULT_DECAY_AFTER_INJECTIONS,
   vccEvidence: false,
+  certify: { timeoutMs: DEFAULT_CERTIFY_TIMEOUT_MS },
 };
 
 export function configPath(): string {
@@ -49,8 +54,19 @@ export async function loadConfig(): Promise<ContinuityConfig> {
           ? Math.floor(raw.decayAfterInjections)
           : DEFAULT_CONFIG.decayAfterInjections,
       vccEvidence: raw.vccEvidence === true,
+      certify: {
+        timeoutMs:
+          typeof (raw.certify as { timeoutMs?: unknown } | undefined)?.timeoutMs === "number" &&
+          (raw.certify as { timeoutMs: number }).timeoutMs > 0
+            ? Math.floor((raw.certify as { timeoutMs: number }).timeoutMs)
+            : DEFAULT_CONFIG.certify.timeoutMs,
+      },
     };
   } catch {
-    return { ...DEFAULT_CONFIG, autoRefine: { ...DEFAULT_CONFIG.autoRefine } };
+    return {
+      ...DEFAULT_CONFIG,
+      autoRefine: { ...DEFAULT_CONFIG.autoRefine },
+      certify: { ...DEFAULT_CONFIG.certify },
+    };
   }
 }

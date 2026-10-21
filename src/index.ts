@@ -33,5 +33,6 @@ export default function piFabricContinuity(pi: ExtensionAPI): void {
   registerAutoRefine(pi);
 }
 
-export { appendDeltas, currentSnapshot, history, journalPath, readTransitions, validateDelta } from "./journal.js";
-export type { ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";
+export { appendDeltas, currentSnapshot, healJournalTail, history, journalPath, readTransitions, validateDelta } from "./journal.js";
+export { certifyItems } from "./certify.js";
+export type { CertStatus, ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";

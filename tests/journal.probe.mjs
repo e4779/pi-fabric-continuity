@@ -152,6 +152,22 @@ check("move: unknown id reports not moved", mvMissing.moved === false && mvMissi
   check("lock: all 20 concurrent creates present", concSnap.items.filter((i) => i.content.startsWith("conc-")).length === 20);
 }
 
+// F4.3: torn-tail healing — a crash-cut last line is truncated under the
+// journal lock; complete-but-invalid lines keep the skip behavior.
+{
+  const p = j.journalPath("project", cwd);
+  const before = (await j.readTransitions(p)).length;
+  appendFileSync(p, '{"version":99999,"ts":');
+  check("heal: torn line skipped on read (no crash)", (await j.readTransitions(p)).length === before);
+  const healed = await j.healJournalTail(p);
+  check("heal: torn tail cut under lock", healed.healed === true, JSON.stringify(healed));
+  check("heal: file ends with newline after healing", readFileSync(p, "utf8").endsWith("\n"));
+  check("heal: valid records survive healing", (await j.readTransitions(p)).length === before);
+  check("heal: healthy journal is a no-op", (await j.healJournalTail(p)).healed === false);
+  appendFileSync(p, "not json at all\n");
+  check("heal: complete invalid line NOT healed", (await j.healJournalTail(p)).healed === false);
+  check("heal: invalid line preserved on disk", readFileSync(p, "utf8").includes("not json at all"));
+}
 const fails = results.filter((r) => r.startsWith("FAIL")).length;
 console.log(results.join("\n"));
 console.log(`\n${results.length - fails}/${results.length} passed`);
