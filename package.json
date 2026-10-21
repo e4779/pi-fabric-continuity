@@ -26,7 +26,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsc -p tsconfig.build.json && cd tests && for p in journal audit certify inject completions delivery refine counters vcc search; do node $p.probe.mjs || exit 1; done"
+    "test": "tsc -p tsconfig.build.json && cd tests && for p in journal audit certify inject delivery refine counters vcc search; do node $p.probe.mjs || exit 1; done"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.0.0",

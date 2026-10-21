@@ -65,9 +65,9 @@ const readEmitted = (name) => {
   throw new Error(`emitted ${name} not found; run tsc -p tsconfig.build.json first`);
 };
 const providerSrc = readEmitted("provider.js");
-const commandsSrc = readEmitted("commands.js");
 check("provider call site forwards cwd", callSiteRe.test(providerSrc));
-check("commands call site forwards cwd", callSiteRe.test(commandsSrc));
+// commands.ts no longer calls auditItems (v0.4.5: /harness surface removed —
+// the provider is the only call site).
 
 console.log(results.join("\n"));
 if (results.some((r) => r.startsWith("FAIL"))) process.exitCode = 1;

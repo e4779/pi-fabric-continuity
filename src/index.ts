@@ -7,7 +7,7 @@
 //   - /harness inspection command; mutations only via journaled deltas
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerHarnessCommand } from "./commands.js";
+import { registerRefineCommand } from "./commands.js";
 import { registerInjection } from "./inject.js";
 import { currentSnapshot } from "./journal.js";
 import { sessionCwdOf } from "./session-cwd.js";
@@ -29,7 +29,7 @@ export default function piFabricContinuity(pi: ExtensionAPI): void {
 
   registerInjection(pi);
   registerContinuityProvider(pi);
-  registerHarnessCommand(pi);
+  registerRefineCommand(pi);
   registerAutoRefine(pi);
 }
 

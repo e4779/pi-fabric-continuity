@@ -65,29 +65,22 @@ ln -s ~/projects/pi-fabric-continuity ~/.pi/agent/extensions/pi-fabric-continuit
 ## Usage
 
 ```
-/harness status            # journal versions + item counts (project & global)
-/harness list [kind]       # items, optionally filtered by prompt|memory|skill|subagent
-/harness search <query>   # case-insensitive literal search over current and historical items
-/harness stats            # per-item injection/touch counters + decay eligibility
-                          # AND historical journal text (old versions, deleted);
-                          # hits carry id, version/ts, bounded snippet
-/harness audit [--apply]   # deterministic staleness check: paths/packages vs the live machine
-/harness certify [global]  # run items' evidenceCmds (fail-closed) and journal the outcome
-/harness history [n]       # recent journal transitions (who/when/why)
-/harness refine [lookback] [instructions]
+/refine [lookback] [instructions]
                           # trajectory evidence -> LLM proposer -> journaled deltas;
-                          # /refine is an alias. Free text after the optional
-                          # number focuses the proposer (e.g. /refine git discipline)
-/harness keep|drop <id>    # importance hygiene (+/-0.1, as transitions)
-/harness revert <version>  # compensating deltas; the journal is never rewritten
+                          # /refine 50 reviews the last 50 turns. Free text after
+                          # the optional number focuses the proposer
+                          # (e.g. /refine 100 git discipline)
 ```
 
-All subcommands, kinds, item ids, and journal versions autocomplete.
-
-The same surface is a first-class fabric provider: any `fabric_exec` program
-(including spawned durable agents) can call
+The single human entry point. Everything else is agent-driven: any
+`fabric_exec` program (including spawned durable agents) can ask for and
+apply curation through the journaled provider — status, list, read, search,
+history, audit, stats, certify, revert, mutate.
 `tools.call({ ref: "continuity.mutate", args: { deltas: [...] } })` with
-fabric-side validation, risk policy, and nested-call audit.
+fabric-side validation, risk policy, and nested-call audit — just ask.
+(v0.4: the `/harness` TUI subcommands were removed at the operator's
+request; `/refine` was the only command ever used, and provider actions
+cover the rest with full journal provenance.)
 `continuity.search` is the same search as `/harness search` as a read-risk
 action: `{ query, scope?, cwd? }` — literal, case-insensitive, no LLM.
 `continuity.stats` is the read-risk view behind `/harness stats`: per-item

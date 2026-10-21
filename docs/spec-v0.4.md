@@ -67,3 +67,12 @@ happens only on certify runs (rare, explicit).
 - Memory-source adapter for journal search (session-shaped extraction is a
   poor fit; continuity.search stays).
 - Background refine actor (v0.5 candidate).
+
+## F4.5 — single-command surface (operator request, 2026-10-21)
+
+The only command the operator ever used was `/refine <lookback>`. The `/harness`
+TUI surface (status/list/search/stats/history/audit/certify/keep/drop/move/
+revert + completions) is removed. `/refine [lookback] [instructions]` is the
+single human entry point; every other operation is agent-driven via the
+`continuity.*` provider actions from fabric_exec — same journal, same actors,
+same provenance. tests/completions.probe.mjs retired with the surface.
