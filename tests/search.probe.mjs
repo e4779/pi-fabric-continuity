@@ -7,12 +7,10 @@ import { probeHome, resetJournals } from "./hermetic.mjs";
 const base = "/tmp/continuity-probe";
 const jPath = [`${base}/src/journal.js`, `${base}/journal.js`].find((p) => existsSync(p));
 const sPath = [`${base}/src/search.js`, `${base}/search.js`].find((p) => existsSync(p));
-const cmdPath = [`${base}/src/commands.js`, `${base}/commands.js`].find((p) => existsSync(p));
-if (!jPath || !sPath || !cmdPath) throw new Error("emitted modules not found; run tsc -p tsconfig.build.json first");
+if (!jPath || !sPath) throw new Error("emitted modules not found; run tsc -p tsconfig.build.json first");
 probeHome(); // must precede the import: journal.js resolves ROOT from $HOME
 const j = await import(jPath);
 const search = await import(sPath);
-const commands = await import(cmdPath);
 
 const cwd = "/tmp/continuity-probe-search-cwd";
 resetJournals(j, [["project", cwd], ["global", cwd]]);
@@ -115,20 +113,9 @@ check("scope: omitted searches both", both.total === 1 && both.hits[0].scope ===
 const blank = await run("   ");
 check("blank query: empty result", blank.total === 0 && blank.hits.length === 0, JSON.stringify(blank));
 
-// F3.2 — /harness search renders the same hits
-let registered = null;
-commands.registerHarnessCommand({ registerCommand: (name, opts) => { if (name === "harness") registered = opts; } });
-const captured = [];
-const fakeCtx = { sessionManager: { getCwd: () => cwd }, ui: { notify: async (msg) => captured.push(String(msg)) } };
-await registered.handler("search quadlets", fakeCtx);
-let last = captured[captured.length - 1] ?? "";
-check("command: renders header + historical hit", last.includes("continuity search") && last.includes(idA) && last.includes("historical") && last.includes("v1"), last);
-await registered.handler("search zznothing-here", fakeCtx);
-last = captured[captured.length - 1] ?? "";
-check("command: no-match message", last.includes("no matches"), last);
-await registered.handler("search", fakeCtx);
-last = captured[captured.length - 1] ?? "";
-check("command: bare search prints usage", last.includes("usage:"), last);
+// F3.2 note: the /harness search rendering went with the TUI surface (v0.4);
+// continuity.search serves the same searchItems results as a read-risk action.
+
 
 const fails = results.filter((r) => r.startsWith("FAIL")).length;
 console.log(results.join("\n"));
