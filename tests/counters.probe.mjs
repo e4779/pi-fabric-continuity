@@ -7,13 +7,11 @@ const base = "/tmp/continuity-probe";
 const jPath = [`${base}/src/journal.js`, `${base}/journal.js`].find((p) => existsSync(p));
 const cPath = [`${base}/src/counters.js`, `${base}/counters.js`].find((p) => existsSync(p));
 const iPath = [`${base}/src/inject.js`, `${base}/inject.js`].find((p) => existsSync(p));
-const cmdPath = [`${base}/src/commands.js`, `${base}/commands.js`].find((p) => existsSync(p));
-if (!jPath || !cPath || !iPath || !cmdPath) throw new Error("emitted modules not found; run tsc -p tsconfig.build.json first");
+if (!jPath || !cPath || !iPath) throw new Error("emitted modules not found; run tsc -p tsconfig.build.json first");
 probeHome(); // must precede imports: journal.js/counters.js resolve ROOT from $HOME
 const j = await import(jPath);
 const counters = await import(cPath);
 const inj = await import(iPath);
-const commands = await import(cmdPath);
 
 // Hermetic baseline: journals and the counters cache start clean.
 resetJournals(j, [["project", undefined], ["global", undefined], ["project", "/tmp/continuity-probe-stats-cwd"]]);
@@ -89,18 +87,16 @@ check("F1.3: decay-eligible flagged", stats.find((s) => s.id === "c_decay")?.dec
 check("F1.3: touched/below/inactive not flagged", stats.filter((s) => s.id !== "c_decay").every((s) => s.decayEligible === false), JSON.stringify(stats));
 check("F1.3: unknown id reads as zeros", counters.statsForItems([mk("c_unknown")], {}, 20)[0].injections === 0);
 
-// --- F1.3: /harness stats renders the same for the human.
-let registered = null;
-commands.registerHarnessCommand({ registerCommand: (name, opts) => { if (name === "harness") registered = opts; } });
-const statsCwd = "/tmp/continuity-probe-stats-cwd";
-await j.appendDeltas({ scope: "project", cwd: statsCwd, actor: "probe", source: "manual", deltas: [{ op: "create", kind: "memory", content: "stats item", evidence: "probe", id: "c_stats" }] });
-for (let i = 0; i < 20; i++) await counters.recordInjections(["c_stats"]);
-const captured = [];
-const fakeCtx = { sessionManager: { getCwd: () => statsCwd }, ui: { notify: async (msg) => captured.push(String(msg)) } };
-await registered.handler("stats", fakeCtx);
-const rendered = captured.join("\n");
-check("F1.3: /harness stats renders counters", rendered.includes("c_stats") && /inj 20 touch 0/.test(rendered), rendered.slice(0, 400));
-check("F1.3: /harness stats flags decay candidate", rendered.includes("decay candidate"), rendered.slice(0, 400));
+// --- F1.3: stats view over freshly recorded injections (the /harness stats
+// rendering went with the TUI surface in v0.4; continuity.stats reads the
+// same statsForItems — kept honest here).
+await counters.recordInjections(["c_stats_fresh"]);
+const freshStats = counters.statsForItems(
+  [{ id: "c_stats_fresh", kind: "memory", content: "x", evidence: "e", importance: 0.5, active: true, scope: "project", createdAt: 0, updatedAt: 0 }],
+  await counters.readCounters(),
+  20,
+);
+check("F1.3: recorded injection visible in stats", freshStats[0]?.injections === 1 && freshStats[0]?.decayEligible === false, JSON.stringify(freshStats[0]));
 
 // --- F1.1 wiring: selection + render split, block unchanged.
 const cfg = { enabled: true, maxTokens: 800, maxPerKind: 8, charsPerToken: 4 };
