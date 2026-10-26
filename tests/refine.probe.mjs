@@ -22,6 +22,17 @@ check("parse: empty -> null", c.parseProposerOutput("") === null);
 const wrapped = c.parseProposerOutput('Here you go: {"deltas":[{"op":"delete","id":"c_1","reason":"stale"}]} hope this helps');
 check("parse: json embedded in prose", wrapped !== null && wrapped.deltas[0].op === "delete");
 
+// v0.5.1: truncation resilience — deltas-first contract + salvage parser
+check("prompt: deltas before summary", typeof c.PROPOSER_SYSTEM === "string" && c.PROPOSER_SYSTEM.includes('{"deltas":[...],"summary"'));
+const cutMidDeltas = c.parseProposerOutput('{"deltas":[{"op":"create","kind":"memory","content":"a","evidence":"b"},{"op":"update","id":"c_1","con');
+check("parse: truncated deltas salvaged", cutMidDeltas !== null && cutMidDeltas.salvaged === true && cutMidDeltas.deltas.length === 1 && cutMidDeltas.deltas[0].op === "create");
+const cutWithSummary = c.parseProposerOutput('{"summary":"ok","deltas":[{"op":"delete","id":"c_1","reason":"x"},{"op":"delete","id":"c_2"');
+check("parse: salvage keeps closed summary", cutWithSummary !== null && cutWithSummary.summary === "ok" && cutWithSummary.deltas.length === 1);
+const tricky = c.parseProposerOutput('{"deltas":[{"op":"create","kind":"memory","content":"brace } and \\" quote inside","evidence":"e"},{"op":"create","kind":"pro');
+check("parse: salvage respects strings/escapes", tricky !== null && tricky.deltas.length === 1 && tricky.deltas[0].content.includes("}"));
+check("parse: empty array truncation -> null", c.parseProposerOutput('{"deltas":[') === null);
+check("parse: old-format summary cut -> null (no deltas emitted yet)", c.parseProposerOutput('{"summary":"NFS deep-dive: root-cause chain (bcach') === null);
+
 // v0.5: the proposer is taught the confirmation bump rule (two-sided refine)
 check("prompt: bump rule instructed", typeof c.PROPOSER_SYSTEM === "string" && c.PROPOSER_SYSTEM.includes("RE-CONFIRMS") && c.PROPOSER_SYSTEM.includes("re-confirmed"));
 

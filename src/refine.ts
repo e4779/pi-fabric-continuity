@@ -46,8 +46,9 @@ export interface RefineResult {
   skipped?: string;
 }
 
-/** Bump when refine behavior changes; appears in last-refine.log. */
-const REFINE_LOG_VERSION = 7;
+/** Bump when refine behavior changes; appears in last-refine.log.
+ *  v8: parseMode/salvagedCount; salvage parser for truncated replies. */
+const REFINE_LOG_VERSION = 8;
 
 /** Reasoning models spend output budget on thinking before emitting text:
  *  a 4k ceiling let glm-5.3 burn the whole budget and return zero text
@@ -132,6 +133,8 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
     usage: msg.usage === undefined ? null : msg.usage,
     msgKeys: Object.keys(msg),
     parsedOk: parsed !== null,
+    parseMode: parsed === null ? "none" : parsed.salvaged ? "salvage" : "strict",
+    salvagedCount: parsed?.salvaged === true ? parsed.deltas.length : 0,
     proposedCount: parsed?.deltas.length ?? 0,
     appliedCount: deltas.length,
     confirmedCount: deltas.filter((d) => d.op === "update" || d.op === "delete").length,
@@ -210,7 +213,9 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       ? truncated
         ? "proposer output truncated at the token ceiling — no deltas applied"
         : "proposer output unparseable — no deltas applied"
-      : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
+      : parsed?.salvaged
+        ? `salvaged ${parsed.deltas.length} delta(s) from a truncated reply`
+        : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
   await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${confirmed > 0 ? `, ${confirmed} confirmed` : ""}${decay > 0 ? `, ${decay} decay` : ""}${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
   return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version, ...(confirmed > 0 ? { confirmed } : {}), ...(decay > 0 ? { decay } : {}) };
 }

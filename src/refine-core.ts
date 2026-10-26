@@ -34,7 +34,9 @@ Rules (ACE-style, strictly):
 - If nothing is clearly warranted, return an empty deltas array.
 - "Operator instructions" in the user message are binding directives from the human operator for this run: when they name a policy, fact, or preference to record, emit the corresponding create/update delta in this response unless it clearly contradicts the evidence.
 
-Respond with STRICT JSON only: {"summary":"one line","deltas":[...]}`;
+Emit "deltas" BEFORE "summary" and keep "summary" to one short line (<=200 chars): a token-length cap must eat prose, never deltas.
+
+Respond with STRICT JSON only: {"deltas":[...],"summary":"..."}`;
 
 /** Extract joinable text from a message content (string or block array). */
 export function textOf(content: unknown): string {
@@ -52,24 +54,90 @@ export function textOf(content: unknown): string {
     .trim();
 }
 
-/** Parse the proposer's reply: strips fences, slices the outermost JSON object. */
-export function parseProposerOutput(text: string): { summary: string; deltas: unknown[] } | null {
+/** Parsed proposer reply. `salvaged` marks a truncated reply (stopReason
+ *  "length") whose complete delta objects were recovered by brace-matching. */
+export interface ProposerOutput {
+  summary: string;
+  deltas: unknown[];
+  salvaged?: boolean;
+}
+
+/** Recover complete delta objects and a closed summary string from a reply
+ *  truncated mid-JSON. Nothing is invented: only closed spans parse. A
+ *  deltas-first reply survives with every complete object; an old-format
+ *  reply cut inside its summary has nothing to recover and yields null. */
+function salvageProposerReply(s: string): ProposerOutput | null {
+  const key = s.indexOf('"deltas"');
+  if (key < 0) return null;
+  const open = s.indexOf("[", key);
+  if (open < 0) return null;
+  const deltas: unknown[] = [];
+  let i = open + 1;
+  for (;;) {
+    while (i < s.length && /[\s,]/.test(s.charAt(i))) i++;
+    if (i >= s.length || s.charAt(i) !== "{") break;
+    let depth = 0;
+    let inString = false;
+    let j = i;
+    for (; j < s.length; j++) {
+      const ch = s.charAt(j);
+      if (inString) {
+        if (ch === "\\") j++;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth !== 0 || j >= s.length) break; // truncated inside this object
+    try {
+      deltas.push(JSON.parse(s.slice(i, j + 1)));
+    } catch {
+      // closed braces but invalid JSON — skip it, keep scanning
+    }
+    i = j + 1;
+  }
+  let summary = "";
+  const summaryMatch = s.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (summaryMatch) {
+    try {
+      summary = JSON.parse('"'.concat(summaryMatch[1] ?? "", '"')) as string;
+    } catch {
+      summary = summaryMatch[1] ?? "";
+    }
+  }
+  if (deltas.length === 0 && !summary) return null;
+  return { summary, deltas, salvaged: true };
+}
+
+/** Parse the proposer's reply: strips fences, slices the outermost JSON
+ *  object; when that span fails to parse (truncation at the token ceiling),
+ *  salvage complete delta objects from the broken prefix instead of
+ *  discarding the whole run (2026-10-25 incident: 6.6k chars of NFS
+ *  summary, zero deltas applied). */
+export function parseProposerOutput(text: string): ProposerOutput | null {
   if (!text) return null;
   let s = text.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) s = fence[1].trim();
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  try {
-    const parsed = JSON.parse(s.slice(start, end + 1)) as { summary?: unknown; deltas?: unknown };
-    return {
-      summary: typeof parsed.summary === "string" ? parsed.summary : "",
-      deltas: Array.isArray(parsed.deltas) ? parsed.deltas : [],
-    };
-  } catch {
-    return null;
+  if (start >= 0 && end > start) {
+    try {
+      const parsed = JSON.parse(s.slice(start, end + 1)) as { summary?: unknown; deltas?: unknown };
+      return {
+        summary: typeof parsed.summary === "string" ? parsed.summary : "",
+        deltas: Array.isArray(parsed.deltas) ? parsed.deltas : [],
+      };
+    } catch {
+      // fall through to salvage
+    }
   }
+  return salvageProposerReply(s);
 }
 
 /** Extract the speaker role from a session entry.
