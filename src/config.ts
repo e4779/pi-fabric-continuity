@@ -21,12 +21,17 @@ export interface ContinuityConfig {
   certify: { timeoutMs: number };
   /** v0.6: store root override (NOTES only; config/counters stay machine-local). */
   store?: { dir?: string };
+  /** v0.6/F6.5: decay quiescence — skip decay while foreign notes are fresher. */
+  decay?: { quiescenceMs?: number };
 }
 
 /** F1.4 — DECAY_AFTER_INJECTIONS from the spec. */
 export const DEFAULT_DECAY_AFTER_INJECTIONS = 20;
 
 export const DEFAULT_CERTIFY_TIMEOUT_MS = 10_000;
+
+/** F6.5: 2x the 15-min sync rail — decay waits out in-flight peer confirms. */
+export const DEFAULT_DECAY_QUIESCENCE_MS = 1_800_000;
 
 export const DEFAULT_CONFIG: ContinuityConfig = {
   autoRefine: { enabled: false, everyTurns: 50 },
@@ -68,6 +73,12 @@ export async function loadConfig(): Promise<ContinuityConfig> {
         typeof (raw.store as { dir?: unknown }).dir === "string" &&
         (raw.store as { dir: string }).dir.trim()
           ? { dir: (raw.store as { dir: string }).dir }
+          : undefined,
+      decay:
+        typeof raw.decay === "object" && raw.decay !== null &&
+        typeof (raw.decay as { quiescenceMs?: unknown }).quiescenceMs === "number" &&
+        (raw.decay as { quiescenceMs: number }).quiescenceMs > 0
+          ? { quiescenceMs: Math.floor((raw.decay as { quiescenceMs: number }).quiescenceMs) }
           : undefined,
     };
   } catch {

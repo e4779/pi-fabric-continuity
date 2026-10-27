@@ -177,7 +177,7 @@ export async function readScope(scope: Scope, cwd?: string): Promise<{ transitio
   const f = await foldDir(await noteDir(scope, cwd), scope);
   return {
     transitions: f.transitions,
-    snapshot: { digest8: f.digest8, fileCount: f.fileCount, items: f.items },
+    snapshot: { digest8: f.digest8, fileCount: f.fileCount, newestForeignTs: f.newestForeignTs, items: f.items },
   };
 }
 
@@ -239,7 +239,7 @@ export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> 
   const fold = await foldDir(dir, opts.scope);
   const versionByName = new Map(fold.metas.map((m, i) => [m.name, i + 1] as const));
   const transitions = records.map((r, i) => toTransition(r, versionByName.get(metas[i]!.name) ?? 0));
-  return { transitions, snapshot: { digest8: fold.digest8, fileCount: fold.fileCount, items: fold.items } };
+  return { transitions, snapshot: { digest8: fold.digest8, fileCount: fold.fileCount, newestForeignTs: fold.newestForeignTs, items: fold.items } };
 }
 
 /** Move an item between scopes: delete from the source store, recreate with

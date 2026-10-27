@@ -85,5 +85,8 @@ export interface JournalSnapshot {
   digest8: string;
   /** Number of note files in the fold (monotonicity companion to digest8). */
   fileCount: number;
+  /** Newest note ts from ANOTHER host (0 = none) — the decay quiescence
+   *  signal: recent foreign notes mean the fold may be stale (F6.5). */
+  newestForeignTs: number;
   items: HarnessItem[];
 }

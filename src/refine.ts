@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "./config.js";
+import { DEFAULT_DECAY_QUIESCENCE_MS, loadConfig } from "./config.js";
 import { decayProposals, readCounters, recordConfirms } from "./counters.js";
 import {
   DEFAULT_LOOKBACK_TURNS,
@@ -187,11 +187,19 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   // Deterministic proposals, journaled like every refine delta (no silent writes).
   let decay = 0;
   try {
+    // F6.5 decay quiescence: never fire irreversible decay from a STALE
+    // fold — foreign notes fresher than the quiescence window (default 2x
+    // the 15-min rail) mean a peer confirm may still be in flight.
+    const quiescenceMs = config.decay?.quiescenceMs ?? DEFAULT_DECAY_QUIESCENCE_MS;
+    const freshForeign = (t: number) => t > 0 && Date.now() - t < quiescenceMs;
+    const staleFold = freshForeign(snap.newestForeignTs) || (scope === "project" && freshForeign(globalSnap.newestForeignTs));
     const counters = await readCounters();
-    const decayDeltas = [
-      ...decayProposals(snap.items, counters, config.decayAfterInjections),
-      ...(scope === "project" ? decayProposals(globalSnap.items, counters, config.decayAfterInjections) : []),
-    ];
+    const decayDeltas = staleFold
+      ? []
+      : [
+          ...decayProposals(snap.items, counters, config.decayAfterInjections),
+          ...(scope === "project" ? decayProposals(globalSnap.items, counters, config.decayAfterInjections) : []),
+        ];
     for (const [targetScope, group] of splitByScope(decayDeltas, scope)) {
       if (group.length === 0) continue;
       const out = await appendDeltas({ scope: targetScope, cwd, actor, source: "refine", deltas: group, note: "attribution decay" });

@@ -55,6 +55,8 @@ export interface NotesFold {
   transitions: Transition[];
   /** File metas aligned with transitions (name <-> version mapping). */
   metas: NoteFileMeta[];
+  /** Newest note ts from another host (0 = none) — decay quiescence (F6.5). */
+  newestForeignTs: number;
 }
 
 const HOST_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
@@ -288,10 +290,14 @@ export async function listNotes(dir: string): Promise<{ notes: LoadedNote[]; ski
 export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
   const { notes: loaded, skipped: skippedBase } = await listNotes(dir);
   if (loaded.length === 0 && skippedBase === 0) {
-    return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [], headPins: new Map(), transitions: [], metas: [] };
+    return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [], headPins: new Map(), transitions: [], metas: [], newestForeignTs: 0 };
   }
   const skipped = { n: skippedBase };
   const pinOwner = new Map<string, string>(); // hash8 -> item id it mutates
+  let newestForeignTs = 0;
+  for (const ln of loaded) {
+    if (ln.record.host !== hostLabel() && ln.record.ts > newestForeignTs) newestForeignTs = ln.record.ts;
+  }
   const cmp = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0);
 
   // Deterministic pin ownership: built from the SORTED array — readdir order
@@ -393,6 +399,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
       ...(ln.record.note !== undefined ? { note: ln.record.note } : {}),
     })),
     metas: loaded.map((ln) => ln.meta),
+    newestForeignTs,
   };
 }
 

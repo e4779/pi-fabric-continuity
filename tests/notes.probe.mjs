@@ -189,6 +189,17 @@ check("canonical: key order ignored", n.canonicalJson({ b: 1, a: 2 }) === n.cano
   check("legacy: update+certify not a conflict", fL.conflicts.length === 0 && fL.items.length === 1 && fL.items[0].cert !== undefined && fL.items[0].cert.status === "certified");
 }
 
+// newestForeignTs: quiescence signal (F6.5)
+{
+  const dQ = dir();
+  await n.writeNotesDir(dQ, [{ actor: "t", source: "manual", delta: { op: "create", kind: "prompt", content: "own", evidence: "e" } }]);
+  const fQ1 = await n.foldDir(dQ, "global");
+  check("quiescence: own-host notes -> newestForeignTs 0", fQ1.newestForeignTs === 0, String(fQ1.newestForeignTs));
+  await n.writeNotesDir(dQ, [{ actor: "t", source: "manual", host: "h2", delta: { op: "create", kind: "prompt", content: "foreign", evidence: "e" } }]);
+  const fQ2 = await n.foldDir(dQ, "global");
+  check("quiescence: foreign note raises newestForeignTs", fQ2.newestForeignTs > 0, String(fQ2.newestForeignTs));
+}
+
 // dotfiles (.last-sync-*.json) must not pollute skipped stats
 {
   const dS = dir();
