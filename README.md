@@ -153,11 +153,16 @@ items inject into every project.
 
 ## Storage
 
-Provider-owned append-only journals, one authority, snapshots derived by folding:
+Provider-owned append-only store, one authority, snapshots derived by folding.
+Since v0.6 the journal is atomic note files — one immutable, content-addressed
+JSON note per transition (`<ts>-<host>-<seq>-<hash8>.json`), ADR-style
+supersession instead of in-place edits, torn tails impossible by construction,
+rail-safe (rsync/git/syncthing) by the single-writer-per-file invariant
+(spec: docs/spec-v0.6.md; rail wrapper: scripts/continuity-sync.sh):
 
 ```
-~/.pi/agent/continuity/global/journal.jsonl
-~/.pi/agent/continuity/projects/<slug>/journal.jsonl
+<store>/global/*.json                     # store.dir config, default
+<store>/projects/<slug>/*.json            # ~/.pi/agent/continuity
 ```
 
 Scopes: `project` (default, slug from cwd) and `global`. Items carry an optional

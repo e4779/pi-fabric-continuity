@@ -224,7 +224,7 @@ function makeProvider(): FabricProvider {
           if (ids.length === 0) throw new Error("ids must be a non-empty array of item ids");
           const out = await revertItems({ scope, cwd, ids, actor });
           return {
-            reverted: ids.length,
+            results: out.results,
             applied: out.transitions.length,
             snapshot: out.snapshot.digest8,
           };

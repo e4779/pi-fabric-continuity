@@ -10,7 +10,7 @@ import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { applyDelta, genId, projectSlug, sortItems, validateDelta, withJournalLock } from "./journal.js";
-import type { Delta, DeltaSource, HarnessItem, Scope } from "./types.js";
+import type { Delta, DeltaSource, HarnessItem, Scope, Transition } from "./types.js";
 
 /** One atomic note = one v0.5 Transition, resharded into its own file.
  *  Envelope change only: the delta schema carries over unchanged (F6.1). */
@@ -51,6 +51,10 @@ export interface NotesFold {
   /** id -> hash of the note that last applied (the item's current head) —
    *  the pin source appendDeltas resolves supersedesFile from. */
   headPins: Map<string, string>;
+  /** Fold-order transitions (version = 1-based position), aligned with metas. */
+  transitions: Transition[];
+  /** File metas aligned with transitions (name <-> version mapping). */
+  metas: NoteFileMeta[];
 }
 
 const HOST_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
@@ -127,16 +131,16 @@ function nextSeq(existing: Set<string>, host: string): number {
 /** Write notes into a directory: seq allocation, canonical bytes, tmp+fsync+
  *  rename, hash-width widening on a same-name/different-content collision.
  *  Whole batch under one lock (same-host sessions serialize here — F6.5). */
-export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{ metas: NoteFileMeta[]; records: NoteRecord[] }> {
+export async function writeNotesDir(dir: string, writes: NoteWrite[], preHeadPins?: Map<string, string>): Promise<{ metas: NoteFileMeta[]; records: NoteRecord[] }> {
   if (writes.length === 0) return { metas: [], records: [] };
   // Whole-batch validation BEFORE any disk write (v0.5 discipline): a
   // mid-batch throw would leave immutable notes half-written, and a caller
-  // retry would re-allocate create ids — duplicate items (review finding 6).
+  // retry would re-allocate create ids — duplicate items.
   for (const w of writes) {
     const err = validateDelta(w.delta);
     if (err) throw new Error(err);
-    if (w.host !== "legacy" && (w.delta.op === "update" || w.delta.op === "delete") && !w.supersedesFile) {
-      throw new Error(`note for op ${w.delta.op} requires supersedesFile (F6.1)`);
+    if (w.host !== "legacy" && (w.delta.op === "update" || w.delta.op === "delete") && w.supersedesFile === undefined && !preHeadPins) {
+      throw new Error(`note for op ${w.delta.op} requires supersedesFile (F6.1) or preHeadPins resolution`);
     }
   }
   // Lock anchor is MACHINE-LOCAL, never inside the store (F6.2): a shipped
@@ -146,6 +150,10 @@ export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{
     const host = hostLabel();
     const existing = new Set((await readdir(dir)).filter((n) => n.endsWith(".json")));
     const perHostSeq = new Map<string, number>();
+    // Pin threading (review phase-2/1-2): sequential updates in ONE batch
+    // chain off their batch predecessor, never the stale pre-batch head —
+    // same-batch [update, update] is a CHAIN, not a sibling fork.
+    const batchPins = new Map<string, string>();
     const metas: NoteFileMeta[] = [];
     const records: NoteRecord[] = [];
     for (const w of writes) {
@@ -164,6 +172,10 @@ export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{
         // (byte-identical across machines, F6.6); fresh creates genId().
         target = w.delta.id ?? (wHost === "legacy" ? `c_legacy_${sha256Hex(canonicalJson(w.delta)).slice(0, 12)}` : genId());
       }
+      let supersedesFile = w.supersedesFile;
+      if ((w.delta.op === "update" || w.delta.op === "delete") && supersedesFile === undefined) {
+        supersedesFile = batchPins.get(w.delta.id) ?? preHeadPins?.get(w.delta.id) ?? "pending";
+      }
       const record: NoteRecord = {
         ts: w.ts ?? Date.now(),
         host: wHost,
@@ -173,7 +185,7 @@ export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{
         delta: w.delta,
         ...(target !== undefined ? { target } : {}),
         ...(w.note !== undefined ? { note: w.note } : {}),
-        ...(w.supersedesFile !== undefined ? { supersedesFile: w.supersedesFile } : {}),
+        ...(supersedesFile !== undefined ? { supersedesFile } : {}),
       };
       const full = noteContentHash(record);
       let hash = full.slice(0, 8);
@@ -208,6 +220,12 @@ export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{
       }
       metas.push({ ts: record.ts, host: wHost, seq, hash, name });
       records.push(record);
+      const touched = w.delta.op === "create"
+        ? target
+        : w.delta.op === "update" || w.delta.op === "delete" || w.delta.op === "certify"
+          ? w.delta.id
+          : undefined;
+      if (touched !== undefined) batchPins.set(touched, hash);
     }
     return { metas, records };
   });
@@ -270,7 +288,7 @@ export async function listNotes(dir: string): Promise<{ notes: LoadedNote[]; ski
 export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
   const { notes: loaded, skipped: skippedBase } = await listNotes(dir);
   if (loaded.length === 0 && skippedBase === 0) {
-    return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [], headPins: new Map() };
+    return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [], headPins: new Map(), transitions: [], metas: [] };
   }
   const skipped = { n: skippedBase };
   const pinOwner = new Map<string, string>(); // hash8 -> item id it mutates
@@ -281,7 +299,10 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
   for (const ln of loaded) {
     if (ln.record.host === "legacy") continue;
     const itemId = ln.record.target ?? (isMutation(ln.record.delta) ? ln.record.delta.id : undefined);
-    if (itemId && ln.record.supersedesFile) pinOwner.set(ln.record.supersedesFile, itemId);
+    // "pending" is fold-INERT (review phase-2/1): it claims no ownership —
+    // two updates to different not-yet-arrived ids must never cross-SKIP
+    // each other through a shared sentinel.
+    if (itemId && ln.record.supersedesFile && ln.record.supersedesFile !== "pending") pinOwner.set(ln.record.supersedesFile, itemId);
   }
 
   // Sibling forks (>=2 mutation notes on one id pinning the SAME predecessor,
@@ -294,7 +315,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
     if (ln.record.host === "legacy" || !isMutation(ln.record.delta)) continue;
     const id = ln.record.target ?? ln.record.delta.id;
     const pin = ln.record.supersedesFile;
-    if (pin === undefined) continue;
+    if (pin === undefined || pin === "pending") continue; // pending chains sequentially — not a fork (review phase-2/2)
     const byPin = pinsById.get(id) ?? new Map<string, LoadedNote[]>();
     const arr = byPin.get(pin) ?? [];
     arr.push(ln);
@@ -317,7 +338,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
   const items = new Map<string, HarnessItem>();
   const apply = (ln: LoadedNote): string | null => {
     // Cross-id pin (pin exists but belongs to another item): skip and log (I6).
-    if (ln.record.supersedesFile && ln.record.host !== "legacy") {
+    if (ln.record.supersedesFile && ln.record.supersedesFile !== "pending" && ln.record.host !== "legacy") {
       const owner = pinOwner.get(ln.record.supersedesFile);
       const self = ln.record.target ?? (isMutation(ln.record.delta) ? ln.record.delta.id : undefined);
       if (owner !== undefined && self !== undefined && owner !== self) return "SKIP";
@@ -362,6 +383,16 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
     orphans,
     conflicts,
     headPins,
+    transitions: loaded.map((ln, i) => ({
+      version: i + 1,
+      ts: ln.record.ts,
+      actor: ln.record.actor,
+      source: ln.record.source,
+      delta: ln.record.delta,
+      ...(ln.record.target !== undefined ? { target: ln.record.target } : {}),
+      ...(ln.record.note !== undefined ? { note: ln.record.note } : {}),
+    })),
+    metas: loaded.map((ln) => ln.meta),
   };
 }
 

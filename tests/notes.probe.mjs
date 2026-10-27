@@ -1,7 +1,7 @@
 // Behavioral probes for the v0.6 notes engine + migration (pure fs, no LLM).
 // Run: tsc -p tsconfig.build.json && node tests/notes.probe.mjs
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -225,7 +225,8 @@ check("canonical: key order ignored", n.canonicalJson({ b: 1, a: 2 }) === n.cano
   check("migrate e2e: journal renamed per-host", r1.out.renamed.length === 1 && !existsSync(jpath));
   const r2 = JSON.parse(spawnSync(process.execPath, [driver], { env, encoding: "utf8" }).stdout);
   check("migrate e2e: marker -> rerun no-op", r2.out.alreadyMarked === true && r2.fileCount === 2);
-  check("migrate e2e: marker is machine-local", existsSync(join(cont, ".migrated-global")));
+  const mks = readdirSync(cont).filter((n) => n.startsWith(".migrated-global"));
+  check("migrate e2e: marker machine-local + store-keyed", mks.length >= 1, mks.join(","));
 }
 
 const fails = results.filter((r) => r.startsWith("FAIL"));

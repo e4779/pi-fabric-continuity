@@ -10,7 +10,7 @@
 import { mkdir, open, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { foldDir, listNotes, noteDir, writeNotesDir } from "./notes.js";
+import { foldDir, noteDir, writeNotesDir } from "./notes.js";
 import type { NoteRecord } from "./notes.js";
 import { migrateLegacyScope } from "./migrate.js";
 import type { ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";
@@ -169,12 +169,22 @@ function toTransition(r: NoteRecord, version: number): Transition {
   };
 }
 
+/** ONE directory read serving BOTH transitions and the snapshot (review
+ *  phase-2/7): search compares versions across the two, so they must come
+ *  from the same fold — never from two independent scans. */
+export async function readScope(scope: Scope, cwd?: string): Promise<{ transitions: Transition[]; snapshot: JournalSnapshot }> {
+  await ensureMigrated(scope, cwd);
+  const f = await foldDir(await noteDir(scope, cwd), scope);
+  return {
+    transitions: f.transitions,
+    snapshot: { digest8: f.digest8, fileCount: f.fileCount, items: f.items },
+  };
+}
+
 /** The scope's notes as transitions in fold order; version = 1-based
  *  position — stable within a fold, comparable for search/history. */
 export async function readScopeTransitions(scope: Scope, cwd?: string): Promise<Transition[]> {
-  await ensureMigrated(scope, cwd);
-  const { notes } = await listNotes(await noteDir(scope, cwd));
-  return notes.map((ln, i) => toTransition(ln.record, i + 1));
+  return (await readScope(scope, cwd)).transitions;
 }
 
 export async function history(scope: Scope, cwd?: string, limit = 20): Promise<Transition[]> {
@@ -188,9 +198,7 @@ export async function healJournalTail(): Promise<{ healed: boolean }> {
 }
 
 export async function currentSnapshot(scope: Scope, cwd?: string): Promise<JournalSnapshot> {
-  await ensureMigrated(scope, cwd);
-  const f = await foldDir(await noteDir(scope, cwd), scope);
-  return { digest8: f.digest8, fileCount: f.fileCount, items: f.items };
+  return (await readScope(scope, cwd)).snapshot;
 }
 
 export interface AppendOutcome {
@@ -207,10 +215,12 @@ export interface AppendOptions {
   note?: string;
 }
 
-/** Atomic batch append onto the note store: every delta validated before
- *  anything is written; update/delete notes carry supersedesFile pins
- *  resolved from the current fold heads ("pending" when the target has not
- *  arrived yet — orphan-tolerant, spec F6.3). */
+/** Batch append onto the note store: validated as a batch, written per-note
+ *  (I3). Pin resolution THREADS through the batch in the engine: sequential
+ *  updates chain off their batch predecessor; targets missing from the fold
+ *  ride as the fold-inert "pending" sentinel (orphan-tolerant, spec F6.3).
+ *  Two directory scans per append (pre-fold, post-fold) are a conscious
+ *  deferral alongside F6.7's read-index non-goal — fine at ~10^2 files. */
 export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> {
   for (const d of opts.deltas) {
     const err = validateDelta(d);
@@ -224,12 +234,10 @@ export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> 
     source: opts.source,
     delta: d,
     ...(opts.note !== undefined ? { note: opts.note } : {}),
-    ...((d.op === "update" || d.op === "delete") ? { supersedesFile: head.headPins.get(d.id) ?? "pending" } : {}),
   }));
-  const { metas, records } = await writeNotesDir(dir, writes);
+  const { metas, records } = await writeNotesDir(dir, writes, head.headPins);
   const fold = await foldDir(dir, opts.scope);
-  const { notes: all } = await listNotes(dir);
-  const versionByName = new Map(all.map((ln, i) => [ln.meta.name, i + 1] as const));
+  const versionByName = new Map(fold.metas.map((m, i) => [m.name, i + 1] as const));
   const transitions = records.map((r, i) => toTransition(r, versionByName.get(metas[i]!.name) ?? 0));
   return { transitions, snapshot: { digest8: fold.digest8, fileCount: fold.fileCount, items: fold.items } };
 }
@@ -272,6 +280,7 @@ export async function moveItem(opts: {
       evidence: item.evidence,
       importance: item.importance,
       ...(item.models ? { models: item.models } : {}),
+      ...(item.evidenceCmds ? { evidenceCmds: item.evidenceCmds } : {}),
       id: item.id,
     },
   ];
@@ -286,12 +295,29 @@ export function sortItems(items: HarnessItem[]): HarnessItem[] {
 
 /** v0.6 revert: undo the LAST mutation of each named item by emitting
  *  inverse deltas (single-note undo, spec F6.4 — version anchors retired). */
-export async function revertItems(opts: { scope: Scope; cwd?: string; ids: string[]; actor: string }): Promise<AppendOutcome> {
-  const all = await readScopeTransitions(opts.scope, opts.cwd);
+export interface RevertOutcome extends AppendOutcome {
+  /** Per-id honesty (review phase-2/3): what was actually undone — unknown
+   *  ids and no-op diffs report applied: false instead of fake success. */
+  results: { id: string; applied: boolean }[];
+}
+
+/** v0.6 revert: undo the LAST mutation of each named item by emitting
+ *  inverse deltas (single-note undo, spec F6.4 — version anchors retired).
+ *  The diff covers content/evidence/importance/active/models/evidenceCmds
+ *  and the certify state (re-certify with the previous status). */
+export async function revertItems(opts: { scope: Scope; cwd?: string; ids: string[]; actor: string }): Promise<RevertOutcome> {
+  const fold = await readScope(opts.scope, opts.cwd);
+  const all = fold.transitions;
+  const curById = new Map(fold.snapshot.items.map((i) => [i.id, i]));
   const deltas: Delta[] = [];
+  const results: { id: string; applied: boolean }[] = [];
   for (const id of opts.ids) {
+    const before = deltas.length;
     const own = all.filter((t) => (t.target ?? (t.delta as { id?: string }).id) === id);
-    if (own.length === 0) continue;
+    if (own.length === 0) {
+      results.push({ id, applied: false });
+      continue;
+    }
     const last = own[own.length - 1]!;
     const items = new Map<string, HarnessItem>();
     for (const t of own.slice(0, -1)) applyDelta(items, t.delta, t.ts, opts.scope, t.target);
@@ -303,27 +329,35 @@ export async function revertItems(opts: { scope: Scope; cwd?: string; ids: strin
         deltas.push({ op: "delete", id, reason: "revert: undo create" });
       }
     } else if (last.delta.op === "delete" && prev) {
-      deltas.push({ op: "create", kind: prev.kind, content: prev.content, evidence: prev.evidence, importance: prev.importance, ...(prev.models ? { models: prev.models } : {}), id });
+      deltas.push({ op: "create", kind: prev.kind, content: prev.content, evidence: prev.evidence, importance: prev.importance, ...(prev.models ? { models: prev.models } : {}), ...(prev.evidenceCmds ? { evidenceCmds: prev.evidenceCmds } : {}), id });
       if (!prev.active) deltas.push({ op: "update", id, active: false });
     } else {
-      const cur = (await currentSnapshot(opts.scope, opts.cwd)).items.find((i) => i.id === id) ?? null;
+      const cur = curById.get(id) ?? null;
       if (prev && cur) {
-        const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean } = { op: "update", id };
+        const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean; models?: string[]; evidenceCmds?: string[] } = { op: "update", id };
         if (cur.content !== prev.content) upd.content = prev.content;
         if (cur.evidence !== prev.evidence) upd.evidence = prev.evidence;
         if (cur.importance !== prev.importance) upd.importance = prev.importance;
         if (cur.active !== prev.active) upd.active = prev.active;
+        if (prev.models !== undefined && cur.models !== prev.models) upd.models = prev.models;
+        if (prev.evidenceCmds !== undefined && cur.evidenceCmds !== prev.evidenceCmds) upd.evidenceCmds = prev.evidenceCmds;
         if (Object.keys(upd).length > 2) deltas.push(upd);
+        // Undo of a certify: restore the previous certification status.
+        const prevCert = prev.cert?.status;
+        if (prevCert !== undefined && cur.cert?.status !== prevCert) {
+          deltas.push({ op: "certify", id, status: prevCert, ...(prev.cert?.digest ? { digest: prev.cert.digest } : {}) });
+        }
       } else if (!prev && cur) {
         deltas.push({ op: "delete", id, reason: "revert: undo to before first record" });
       }
     }
+    results.push({ id, applied: deltas.length > before });
   }
   if (deltas.length === 0) {
-    const snap = await currentSnapshot(opts.scope, opts.cwd);
-    return { transitions: [], snapshot: snap };
+    return { transitions: [], snapshot: fold.snapshot, results };
   }
-  return appendDeltas({ scope: opts.scope, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas, note: "revert: single-note undo" });
+  const out = await appendDeltas({ scope: opts.scope, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas, note: "revert: single-note undo" });
+  return { ...out, results };
 }
 
 /** Inter-process writer lock: exclusive-create with stale takeover.

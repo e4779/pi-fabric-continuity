@@ -5,7 +5,7 @@
 // Deliberately dumb: toLowerCase + indexOf, no LLM, no ranking, no regex —
 // a search hit must never depend on a model or misread metacharacters.
 
-import { currentSnapshot, readScopeTransitions } from "./journal.js";
+import { readScope } from "./journal.js";
 import type { ComponentKind, Scope, Transition } from "./types.js";
 
 /** Hard cap on returned hits — a search result stays bounded by design. */
@@ -68,7 +68,10 @@ type TextAsOf = Partial<Record<"content" | "evidence", { version: number; ts: nu
 /** One journal's search: a read-only walk for historical text spots plus the
  *  current snapshot for live items. Never touches the journal. */
 async function searchOneScope(scope: Scope, cwd: string | undefined, queryLower: string): Promise<SearchHit[]> {
-  const transitions = await readScopeTransitions(scope, cwd);
+  // ONE fold serves both historical transitions and the current snapshot
+  // (review phase-2/7): versions must never be compared across two scans.
+  const scopeFold = await readScope(scope, cwd);
+  const transitions = scopeFold.transitions;
 
   // Historical item text: every content/evidence value a transition ever
   // carried, deduped per (id, version) with content preferred.
@@ -105,7 +108,7 @@ async function searchOneScope(scope: Scope, cwd: string | undefined, queryLower:
 
   // Current items: one hit per item, first matching field wins, cited at the
   // transition that established that field's current text.
-  const snap = await currentSnapshot(scope, cwd);
+  const snap = scopeFold.snapshot;
   const currentHits: SearchHit[] = [];
   const currentAsOf = new Map<string, number>(); // "id:field" -> version
   for (const it of snap.items) {

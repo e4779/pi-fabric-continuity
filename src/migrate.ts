@@ -8,19 +8,27 @@
 
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { journalPath, projectSlug } from "./journal.js";
 import { hostLabel, noteDir, writeNotesDir } from "./notes.js";
 import type { NoteWrite } from "./notes.js";
 import type { Scope, Transition } from "./types.js";
 
-function markerPath(scope: Scope, cwd?: string): string {
+/** Marker name is keyed by the RESOLVED store dir (review phase-2/5):
+ *  flipping store.dir later must not be silenced by an old marker — the
+ *  new root re-migrates from the legacy journal that is still in place. */
+function markerPath(scope: Scope, cwd: string | undefined, dir: string): string {
   const slug = scope === "global" ? "global" : `p-${projectSlug(cwd ?? process.cwd())}`;
-  return join(homedir(), ".pi", "agent", "continuity", `.migrated-${slug}`);
+  const h = createHash("sha256").update(dir).digest("hex").slice(0, 8);
+  return join(homedir(), ".pi", "agent", "continuity", `.migrated-${slug}-${h}`);
 }
 
 export async function migrateLegacyScope(opts: { scope: Scope; cwd?: string; force?: boolean }): Promise<{ migrated: number; renamed: string[]; alreadyMarked: boolean }> {
-  const marker = markerPath(opts.scope, opts.cwd);
+  const legacy = journalPath(opts.scope, opts.cwd);
+  const legacyDir = dirname(legacy);
+  const dir = await noteDir(opts.scope, opts.cwd);
+  const marker = markerPath(opts.scope, opts.cwd, dir);
   let already = false;
   try {
     await readFile(marker, "utf8");
@@ -30,9 +38,6 @@ export async function migrateLegacyScope(opts: { scope: Scope; cwd?: string; for
   }
   if (already && !opts.force) return { migrated: 0, renamed: [], alreadyMarked: true };
 
-  const legacy = journalPath(opts.scope, opts.cwd);
-  const legacyDir = dirname(legacy);
-  const dir = await noteDir(opts.scope, opts.cwd);
   const writes: NoteWrite[] = [];
   const sources: string[] = [legacy];
   // Ingest peer-delivered / prior-run backups beside the journal — content-
