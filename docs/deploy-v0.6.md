@@ -62,14 +62,20 @@ git tag v0.6.0 && git push origin main v0.6.0
 
 ## thinkpad (runbook — machine was unreachable at deploy time)
 
-1. `git pull` dot-pi (receives migrated notes + this runbook).
-2. Replace config symlink with a local file (same shape as hlab's, its own
-   autoRefine).
-3. Update the package (`pi update --extensions`). Its own legacy
-   `journal.jsonl` tails auto-migrate with the fixed `host="legacy"`
-   label — content-addressed names dedupe against hlab's notes via the
-   shared tree, by design (spec F6.6).
-4. Join the rsync rail (step 5 above) from both sides.
+NOTE: dot-pi's whitelist gitignore deliberately excludes continuity DATA
+(only config.json is tracked) — there is NO git rail for notes, by design
+(I5, rail-agnostic store). The stores REUNIFY via the rsync rail, not git:
+
+1. Replace the config symlink with a local file (same shape as hlab's, its
+   own autoRefine + `store.dir` pointing at ITS shared store path).
+2. Update the package (`pi update --extensions`). Its own legacy
+   `journal.jsonl` auto-migrates with the fixed `host="legacy"` label —
+   lines SHARED with hlab's history produce byte-identical content-addressed
+   filenames, so the first rail sync dedupes them; only machine-unique tails
+   arrive as new notes (spec F6.6 — this is exactly what it was designed for).
+3. Join the rsync rail (step 5 above) from both sides.
+4. Only after both machines ride the rail: retire the dot-pi continuity
+   symlinks on thinkpad (config/counters go machine-local, as on hlab).
 
 ## Rollback
 
