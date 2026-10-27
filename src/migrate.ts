@@ -6,9 +6,9 @@
 // and NEVER inside the store (a store-side marker ships via rsync and lets
 // the peer start un-migrated — council finding).
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { journalPath, projectSlug } from "./journal.js";
 import { hostLabel, noteDir, writeNotesDir } from "./notes.js";
 import type { NoteWrite } from "./notes.js";
@@ -31,9 +31,20 @@ export async function migrateLegacyScope(opts: { scope: Scope; cwd?: string; for
   if (already && !opts.force) return { migrated: 0, renamed: [], alreadyMarked: true };
 
   const legacy = journalPath(opts.scope, opts.cwd);
+  const legacyDir = dirname(legacy);
   const dir = await noteDir(opts.scope, opts.cwd);
   const writes: NoteWrite[] = [];
   const sources: string[] = [legacy];
+  // Ingest peer-delivered / prior-run backups beside the journal — content-
+  // addressed names keep re-splitting idempotent (review finding 1: the
+  // sources list previously stopped at the live journal only).
+  try {
+    for (const nm of await readdir(legacyDir)) {
+      if (/^journal\.legacy.*\.jsonl$/.test(nm)) sources.push(join(legacyDir, nm));
+    }
+  } catch {
+    // no legacy dir yet — fine
+  }
 
   // Also ingest any journal.legacy*.jsonl sitting beside (peer-delivered or
   // prior partial migrations) — content-addressed names keep it idempotent.
@@ -71,7 +82,7 @@ export async function migrateLegacyScope(opts: { scope: Scope; cwd?: string; for
   // across the rail). Missing file => nothing to rename.
   const renamed: string[] = [];
   try {
-    const backup = join(legacy, "..", `journal.legacy-${hostLabel()}.jsonl`);
+    const backup = join(legacyDir, `journal.legacy-${hostLabel()}.jsonl`);
     await rename(legacy, backup);
     renamed.push(backup);
   } catch {

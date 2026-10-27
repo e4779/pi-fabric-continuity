@@ -9,7 +9,7 @@ import { mkdir, open, readdir, readFile, rename } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { applyDelta, genId, projectSlug, sortItems, withJournalLock } from "./journal.js";
+import { applyDelta, genId, projectSlug, sortItems, validateDelta, withJournalLock } from "./journal.js";
 import type { Delta, DeltaSource, HarnessItem, Scope } from "./types.js";
 
 /** One atomic note = one v0.5 Transition, resharded into its own file.
@@ -126,7 +126,19 @@ function nextSeq(existing: Set<string>, host: string): number {
  *  Whole batch under one lock (same-host sessions serialize here — F6.5). */
 export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{ metas: NoteFileMeta[]; records: NoteRecord[] }> {
   if (writes.length === 0) return { metas: [], records: [] };
-  return withJournalLock(join(dir, "notes"), async () => {
+  // Whole-batch validation BEFORE any disk write (v0.5 discipline): a
+  // mid-batch throw would leave immutable notes half-written, and a caller
+  // retry would re-allocate create ids — duplicate items (review finding 6).
+  for (const w of writes) {
+    const err = validateDelta(w.delta);
+    if (err) throw new Error(err);
+    if (w.host !== "legacy" && (w.delta.op === "update" || w.delta.op === "delete") && !w.supersedesFile) {
+      throw new Error(`note for op ${w.delta.op} requires supersedesFile (F6.1)`);
+    }
+  }
+  // Lock anchor is MACHINE-LOCAL, never inside the store (F6.2): a shipped
+  // held lock would stall peer writes for the lock timeout (review finding 2).
+  return withJournalLock(join(homedir(), ".pi", "agent", "continuity", "locks", sha256Hex(dir).slice(0, 16)), async () => {
     await mkdir(dir, { recursive: true });
     const host = hostLabel();
     const existing = new Set((await readdir(dir)).filter((n) => n.endsWith(".json")));
@@ -135,16 +147,19 @@ export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{
     const records: NoteRecord[] = [];
     for (const w of writes) {
       const wHost = w.host ?? host;
-      if (wHost !== "legacy" && (w.delta.op === "update" || w.delta.op === "delete") && !w.supersedesFile) {
-        throw new Error(`note for op ${w.delta.op} requires supersedesFile (F6.1)`);
-      }
       const seq = w.seq ?? ((perHostSeq.get(wHost) ?? nextSeq(existing, wHost)));
-      if (w.seq === undefined) perHostSeq.set(wHost, seq + 1);
+      // Explicit seqs must still seed the batch cursor: a later auto write
+      // never allocates below the batch's own max (review finding 8).
+      perHostSeq.set(wHost, Math.max(perHostSeq.get(wHost) ?? 0, seq + 1));
       // Creates without an explicit id allocate one HERE, persisted in the
       // note file (record.target) — folds must never regenerate ids (v0.5
       // appendDeltas discipline, carried into the envelope).
       let target = w.target;
-      if (w.delta.op === "create" && target === undefined && w.delta.id === undefined) target = genId();
+      if (w.delta.op === "create" && target === undefined && w.delta.id === undefined) {
+        // Legacy creates without a recorded target must NOT genId() — both
+        // machines must emit byte-identical files (F6.6, review finding 10).
+        target = wHost === "legacy" ? `c_legacy_${sha256Hex(canonicalJson(w.delta)).slice(0, 12)}` : genId();
+      }
       const record: NoteRecord = {
         ts: w.ts ?? Date.now(),
         host: wHost,
@@ -210,7 +225,7 @@ function isMutation(d: Delta): d is MutationDelta {
 export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
   let names: string[] = [];
   try {
-    names = (await readdir(dir)).filter((n) => n.endsWith(".json"));
+    names = (await readdir(dir)).filter((n) => n.endsWith(".json") && !n.startsWith("."));
   } catch {
     return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [] };
   }
@@ -239,11 +254,48 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
       skipped.n += 1;
       continue;
     }
-    const itemId = record.target ?? (isMutation(record.delta) ? record.delta.id : undefined);
-    if (itemId && record.supersedesFile) pinOwner.set(record.supersedesFile, itemId);
     loaded.push({ meta, record });
   }
-  loaded.sort((a, b) => a.meta.ts - b.meta.ts || a.meta.host.localeCompare(b.meta.host) || a.meta.seq - b.meta.seq || a.meta.hash.localeCompare(b.meta.hash));
+  const cmp = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0);
+  loaded.sort((a, b) => a.meta.ts - b.meta.ts || cmp(a.meta.host, b.meta.host) || a.meta.seq - b.meta.seq || cmp(a.meta.hash, b.meta.hash));
+
+  // Deterministic pin ownership: built from the SORTED array — readdir order
+  // must never leak into fold results (review finding 4).
+  for (const ln of loaded) {
+    if (ln.record.host === "legacy") continue;
+    const itemId = ln.record.target ?? (isMutation(ln.record.delta) ? ln.record.delta.id : undefined);
+    if (itemId && ln.record.supersedesFile) pinOwner.set(ln.record.supersedesFile, itemId);
+  }
+
+  // Sibling forks (>=2 mutation notes on one id pinning the SAME predecessor,
+  // non-legacy): newest by (ts,host,seq,hash) wins and is applied; losers
+  // stay historical — never applied, no Frankenstein merge of disjoint
+  // fields (review finding 5). Legacy is totally ordered by seq=version:
+  // forks impossible (review finding 3).
+  const pinsById = new Map<string, Map<string, LoadedNote[]>>();
+  for (const ln of loaded) {
+    if (ln.record.host === "legacy" || !isMutation(ln.record.delta)) continue;
+    const id = ln.record.target ?? ln.record.delta.id;
+    const pin = ln.record.supersedesFile;
+    if (pin === undefined) continue;
+    const byPin = pinsById.get(id) ?? new Map<string, LoadedNote[]>();
+    const arr = byPin.get(pin) ?? [];
+    arr.push(ln);
+    byPin.set(pin, arr);
+    pinsById.set(id, byPin);
+  }
+  const conflicts: string[] = [];
+  const losers = new Set<string>();
+  for (const [id, byPin] of pinsById) {
+    let forked = false;
+    for (const arr of byPin.values()) {
+      if (arr.length < 2) continue;
+      forked = true;
+      const ordered = [...arr].sort((a, b) => a.meta.ts - b.meta.ts || cmp(a.meta.host, b.meta.host) || a.meta.seq - b.meta.seq || cmp(a.meta.hash, b.meta.hash));
+      for (const l of ordered.slice(0, -1)) losers.add(l.meta.name);
+    }
+    if (forked) conflicts.push(id);
+  }
 
   const items = new Map<string, HarnessItem>();
   const apply = (ln: LoadedNote): string | null => {
@@ -263,6 +315,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
     const failed: LoadedNote[] = [];
     let skipInc = 0;
     for (const ln of queue) {
+      if (losers.has(ln.meta.name)) continue;
       const res = apply(ln);
       if (isSkip(res)) skipInc += 1;
       else if (res === null && isMutation(ln.record.delta)) failed.push(ln);
@@ -277,26 +330,6 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
       break;
     }
     queue = failed; // parents may arrive later in (ts,host,seq) — retry
-  }
-
-  // Fork surfacing: >=2 mutation notes on one id sharing the same predecessor pin.
-  const pinsById = new Map<string, Map<string, number>>();
-  for (const ln of loaded) {
-    if (!isMutation(ln.record.delta)) continue;
-    const id = ln.record.target ?? ln.record.delta.id;
-    const pin = ln.record.supersedesFile ?? "(legacy)";
-    const byPin = pinsById.get(id) ?? new Map<string, number>();
-    byPin.set(pin, (byPin.get(pin) ?? 0) + 1);
-    pinsById.set(id, byPin);
-  }
-  const conflicts: string[] = [];
-  for (const [id, byPin] of pinsById) {
-    for (const count of byPin.values()) {
-      if (count >= 2) {
-        conflicts.push(id);
-        break;
-      }
-    }
   }
 
   const hashes = loaded.map((ln) => ln.meta.hash).sort();

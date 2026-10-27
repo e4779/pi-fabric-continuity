@@ -1,9 +1,9 @@
 // Behavioral probes for the v0.6 notes engine + migration (pure fs, no LLM).
 // Run: tsc -p tsconfig.build.json && node tests/notes.probe.mjs
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { existsSync as es } from "node:fs";
 
 const candidates = ["/tmp/continuity-probe/src/notes.js", "/tmp/continuity-probe/notes.js"];
 const cpath = ["/tmp/continuity-probe/src/migrate.js", "/tmp/continuity-probe/migrate.js"];
@@ -164,6 +164,68 @@ check("canonical: key order ignored", n.canonicalJson({ b: 1, a: 2 }) === n.cano
   const fA = await n.foldDir(dA, "global");
   check("migrate: legacy fold = create+update applied", fA.items.length === 1 && fA.items[0].importance === 0.7 && fA.items[0].id === "c_leg_1");
   check("migrate: legacy notes carry no pins, no conflicts", fA.conflicts.length === 0);
+}
+
+// fork: disjoint fields on sibling heads must NOT merge (winner only)
+{
+  const dD = dir();
+  const cD = await n.writeNotesDir(dD, [{ actor: "t", source: "manual", delta: { op: "create", kind: "skill", content: "d1", evidence: "e" } }]);
+  const did = cD.records[0].target;
+  await n.writeNotesDir(dD, [{ actor: "t", source: "manual", host: "h9", ts: 1793000000100, delta: { op: "update", id: did, content: "h9c" }, supersedesFile: cD.metas[0].hash, target: did }]);
+  await n.writeNotesDir(dD, [{ actor: "t", source: "manual", host: "hz", ts: 1793000000200, delta: { op: "update", id: did, importance: 0.11 }, supersedesFile: cD.metas[0].hash, target: did }]);
+  const fD = await n.foldDir(dD, "global");
+  check("fork: disjoint fields winner-only (no Frankenstein)", fD.items.length === 1 && fD.items[0].content === "d1" && fD.items[0].importance === 0.11, "c=" + fD.items[0].content + " i=" + fD.items[0].importance);
+}
+
+// legacy chains: update+certify is the norm, never a conflict
+{
+  const dL = dir();
+  await n.writeNotesDir(dL, [
+    { actor: "t", source: "manual", host: "legacy", ts: 1793000000001, seq: 1, delta: { op: "create", kind: "memory", content: "l", evidence: "e" }, target: "c_l1" },
+    { actor: "t", source: "manual", host: "legacy", ts: 1793000000002, seq: 2, delta: { op: "update", id: "c_l1", importance: 0.7 } },
+    { actor: "t", source: "manual", host: "legacy", ts: 1793000000003, seq: 3, delta: { op: "certify", id: "c_l1", status: "certified" } },
+  ]);
+  const fL = await n.foldDir(dL, "global");
+  check("legacy: update+certify not a conflict", fL.conflicts.length === 0 && fL.items.length === 1 && fL.items[0].cert !== undefined && fL.items[0].cert.status === "certified");
+}
+
+// dotfiles (.last-sync-*.json) must not pollute skipped stats
+{
+  const dS = dir();
+  await n.writeNotesDir(dS, [{ actor: "t", source: "manual", delta: { op: "create", kind: "prompt", content: "s", evidence: "e" } }]);
+  writeFileSync(join(dS, ".last-sync-hlab.json"), "{}");
+  const fS = await n.foldDir(dS, "global");
+  check("fold: dotfiles ignored (not skipped-noise)", fS.items.length === 1 && fS.skipped === 0);
+}
+
+// migration end-to-end: real migrateLegacyScope in a child with fresh HOME
+{
+  const home = dir();
+  const cont = join(home, ".pi", "agent", "continuity");
+  mkdirSync(join(cont, "global"), { recursive: true });
+  const jpath = join(cont, "global", "journal.jsonl");
+  const line = (v, t, delta, target) => JSON.stringify({ version: v, ts: t, actor: "a", source: "manual", delta, ...(target ? { target } : {}) });
+  writeFileSync(jpath, [
+    line(1, 1793000000000, { op: "create", kind: "memory", content: "M1", evidence: "e" }, "c_m_1"),
+    line(2, 1793000000001, { op: "update", id: "c_m_1", importance: 0.7 }),
+  ].join("\n") + "\n");
+  const store = join(home, "store");
+  writeFileSync(join(cont, "config.json"), JSON.stringify({ store: { dir: store } }));
+  const driver = join(home, "driver.mjs");
+  writeFileSync(driver, [
+    "const m = await import(process.env.PROBE_MIGRATE);",
+    "const n = await import(process.env.PROBE_NOTES);",
+    'const out = await m.migrateLegacyScope({ scope: "global" });',
+    'const f = await n.foldDir(process.env.PROBE_STORE + "/global", "global");',
+    "console.log(JSON.stringify({ out, fileCount: f.fileCount, items: f.items.map((i) => [i.id, i.importance]) }));",
+  ].join("\n"));
+  const env = { ...process.env, HOME: home, PROBE_MIGRATE: mfound, PROBE_NOTES: found, PROBE_STORE: store };
+  const r1 = JSON.parse(spawnSync(process.execPath, [driver], { env, encoding: "utf8" }).stdout);
+  check("migrate e2e: split + fold via store.dir", r1.out.migrated === 2 && r1.fileCount === 2 && r1.items.length === 1 && r1.items[0][0] === "c_m_1" && r1.items[0][1] === 0.7, JSON.stringify(r1).slice(0, 160));
+  check("migrate e2e: journal renamed per-host", r1.out.renamed.length === 1 && !existsSync(jpath));
+  const r2 = JSON.parse(spawnSync(process.execPath, [driver], { env, encoding: "utf8" }).stdout);
+  check("migrate e2e: marker -> rerun no-op", r2.out.alreadyMarked === true && r2.fileCount === 2);
+  check("migrate e2e: marker is machine-local", existsSync(join(cont, ".migrated-global")));
 }
 
 const fails = results.filter((r) => r.startsWith("FAIL"));
