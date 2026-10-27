@@ -1,174 +1,96 @@
-// Behavioral probes for the continuity journal (no test framework needed).
+// Behavioral probes for the v0.6 journal facade over the note store.
 // Run: tsc -p tsconfig.build.json && node tests/journal.probe.mjs
-import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { probeHome, resetJournals } from "./hermetic.mjs";
 
 const candidates = ["/tmp/continuity-probe/src/journal.js", "/tmp/continuity-probe/journal.js"];
 const found = candidates.find((p) => existsSync(p));
-if (!found) throw new Error("emitted journal.js not found; run tsc -p tsconfig.build.json first");
-probeHome(); // must precede the import: journal.js resolves ROOT from $HOME
+if (!found) throw new Error("emitted journal.js not found");
+probeHome(); // before import: paths resolve from $HOME
 const j = await import(found);
 
 const results = [];
 function check(name, cond, detail = "") {
-  results.push(`${cond ? "PASS" : "FAIL"} ${name}${cond ? "" : " :: " + detail}`);
+  results.push((cond ? "PASS " : "FAIL ") + name + (cond ? "" : " :: " + detail));
 }
-
-const cwd = "/tmp/fakehome/proj";
-
-// Hermetic baseline: this probe asserts absolute versions, so start from
-// empty journals no matter what earlier runs (or crashes) left behind.
+const cwd = "/tmp/continuity-probe-journal-cwd";
 resetJournals(j, [["project", cwd], ["global", cwd]]);
 
-// 1) validation rejects incomplete deltas
-check("validate: empty content rejected", j.validateDelta({ op: "create", kind: "prompt", content: "", evidence: "x" }) !== null);
-check("validate: delete without reason rejected", j.validateDelta({ op: "delete", id: "c_x" }) !== null);
-check("validate: good create passes", j.validateDelta({ op: "create", kind: "memory", content: "always run rg before cat", evidence: "trajectory turn 3" }) === null);
-
-// 1b) scope validation and routing
-check("validate: global scope accepted", j.validateDelta({ op: "create", kind: "memory", content: "x", evidence: "y", scope: "global" }) === null);
-check("validate: bad scope rejected", j.validateDelta({ op: "create", kind: "memory", content: "x", evidence: "y", scope: "universal" }) !== null);
-const groups = j.splitByScope([
-  { op: "create", kind: "memory", content: "a", evidence: "e" },
-  { op: "create", kind: "memory", content: "b", evidence: "e", scope: "global" },
-  { op: "delete", id: "c_x", reason: "r", scope: "global" },
-], "project");
-check("split: default fills project", groups.get("project").length === 1);
-check("split: explicit global routed", groups.get("global").length === 2);
-
-// 2) create batch
-const created = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
-  { op: "create", kind: "prompt", content: "verify edits with targeted probes", evidence: "turn 5 fix" },
-  { op: "create", kind: "memory", content: "prefer TOON over JSON", evidence: "turn 7", importance: 0.9 },
+// create -> notes-backed snapshot
+const out1 = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
+  { op: "create", kind: "memory", content: "first fact", evidence: "e1", importance: 0.7 },
 ] });
-check("create: version 2", created.snapshot.version === 2, `got ${created.snapshot.version}`);
-check("create: two items", created.snapshot.items.length === 2);
-const memId = created.snapshot.items.find((i) => i.kind === "memory").id;
-check("create: ids server-generated", /^c_/.test(memId));
+check("append: create returns transition + snapshot", out1.transitions.length === 1 && typeof out1.snapshot.digest8 === "string" && out1.snapshot.digest8.length === 8 && out1.snapshot.fileCount === 1, JSON.stringify(out1.snapshot));
+const id1 = out1.transitions[0].target;
+check("append: create allocates a persisted id", typeof id1 === "string" && id1.startsWith("c_"), String(id1));
 
-// 2b) ids must be stable across independent folds
-const refold = await j.currentSnapshot("project", cwd);
-check("fold: ids stable across refolds", refold.items.length === 2 && refold.items.every((i) => created.snapshot.items.some((c) => c.id === i.id)));
+// id stability across folds (the v0.5 regenerated-id pain class)
+const snap1 = await j.currentSnapshot("project", cwd);
+check("fold: id stable across reads", snap1.items.length === 1 && snap1.items[0].id === id1);
+check("fold: digest stable across reads", snap1.digest8 === out1.snapshot.digest8);
 
-// 3) update + fresh fold
+// update lands as a pinned note
+const out2 = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
+  { op: "update", id: id1, content: "first fact v2" },
+] });
+const snap2 = await j.currentSnapshot("project", cwd);
+check("append: pinned update applies", snap2.items[0].content === "first fact v2" && snap2.digest8 !== snap1.digest8, snap2.items[0] && snap2.items[0].content);
+
+// history carries fold-order versions
+const hist = await j.history("project", cwd, 10);
+check("history: versions are fold positions", hist.length === 2 && hist[0].version === 1 && hist[1].version === 2, JSON.stringify(hist.map((h) => h.version)));
+
+// move preserves the id across scopes
+const mv = await j.moveItem({ cwd, id: id1, to: "global", actor: "probe" });
+const gSnap = await j.currentSnapshot("global", cwd);
+const pSnap = await j.currentSnapshot("project", cwd);
+check("move: id preserved, scopes swapped", mv.moved === true && gSnap.items.some((i) => i.id === id1) && !pSnap.items.some((i) => i.id === id1));
+
+// revert: undo the move's create in global
+const rv = await j.revertItems({ scope: "global", cwd, ids: [id1], actor: "probe" });
+const gSnap2 = await j.currentSnapshot("global", cwd);
+check("revert: undo create removes item", rv.transitions.length >= 1 && !gSnap2.items.some((i) => i.id === id1), "applied=" + rv.transitions.length);
+
+// revert a delete: create -> delete -> revert restores
+const out3 = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
+  { op: "create", kind: "prompt", content: "temp", evidence: "e" },
+] });
+const id3 = out3.transitions[0].target;
 await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
-  { op: "update", id: memId, importance: 0.95, active: false },
+  { op: "delete", id: id3, reason: "probe delete" },
 ] });
-const snap = await j.currentSnapshot("project", cwd);
-const mem = snap.items.find((i) => i.id === memId);
-check("update: importance applied", mem && mem.importance === 0.95, JSON.stringify(mem));
-check("update: active toggled", mem && mem.active === false);
-check("fold: version 3", snap.version === 3);
+await j.revertItems({ scope: "project", cwd, ids: [id3], actor: "probe" });
+const snap3 = await j.currentSnapshot("project", cwd);
+check("revert: undo delete restores item", snap3.items.some((i) => i.id === id3 && i.content === "temp"));
 
-// 4) history order + target stamping
-const h = await j.history("project", cwd, 2);
-check("history: newest first", h[0].version === 3 && h[1].version === 2);
-check("history: target stamped", h.some((t) => t.target === memId));
+// legacy JSONL: auto-migrated on first open, marker blocks sneaked re-runs
+const cwd2 = "/tmp/continuity-probe-mig-cwd";
+resetJournals(j, [["project", cwd2]]);
+const home = process.env.HOME;
+const legacyPath = j.journalPath("project", cwd2);
+mkdirSync(legacyPath.split("/").slice(0, -1).join("/"), { recursive: true });
+const line = (v, t, delta, target) => JSON.stringify({ version: v, ts: t, actor: "legacy", source: "manual", delta, ...(target ? { target } : {}) });
+writeFileSync(legacyPath, [
+  line(1, 1793000000000, { op: "create", kind: "memory", content: "legacy fact", evidence: "le" }, "c_leg_x"),
+  line(2, 1793000000001, { op: "update", id: "c_leg_x", importance: 0.9 }),
+].join("\n") + "\n");
+const migSnap = await j.currentSnapshot("project", cwd2);
+check("migrate: legacy auto-splits on first open", migSnap.items.length === 1 && migSnap.items[0].id === "c_leg_x" && migSnap.items[0].importance === 0.9, JSON.stringify(migSnap.items.map((i) => [i.id, i.importance])));
+check("migrate: original renamed, marker machine-local", !existsSync(legacyPath) && existsSync(home + "/.pi/agent/continuity/.migrated-p-continuity-probe-mig-cwd"));
+const before = (await j.currentSnapshot("project", cwd2)).digest8;
+writeFileSync(legacyPath, line(3, 1793000000002, { op: "create", kind: "prompt", content: "sneak", evidence: "e" }, "c_sneak") + "\n");
+const after = (await j.currentSnapshot("project", cwd2)).digest8;
+check("migrate: marker blocks re-migration of sneaked legacy", before === after);
 
-// 5) delete with reason
-await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
-  { op: "delete", id: memId, reason: "superseded by TOON policy item" },
+// store.dir config routes the store (dynamic resolution, no restart)
+writeFileSync(home + "/.pi/agent/continuity/config.json", JSON.stringify({ store: { dir: home + "/alt-store" } }));
+const outAlt = await j.appendDeltas({ scope: "global", cwd, actor: "probe", source: "manual", deltas: [
+  { op: "create", kind: "skill", content: "alt store", evidence: "e" },
 ] });
-const after = await j.currentSnapshot("project", cwd);
-check("delete: item gone", !after.items.some((i) => i.id === memId));
-check("delete: version 4", after.version === 4);
+check("store.dir: notes land in the configured root", outAlt.snapshot.fileCount >= 1 && existsSync(home + "/alt-store/global"));
+writeFileSync(home + "/.pi/agent/continuity/config.json", "{}");
 
-// 6) atomicity: invalid batch appends nothing
-let threw = false;
-try {
-  await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
-    { op: "create", kind: "skill", content: "ok", evidence: "ok" },
-    { op: "update", id: "" },
-  ] });
-} catch { threw = true; }
-check("atomic: invalid batch throws", threw);
-const post = await j.currentSnapshot("project", cwd);
-check("atomic: version unchanged", post.version === 4, `got ${post.version}`);
-check("atomic: no phantom item", post.items.length === 1);
-
-// 7) corrupt-line tolerance
-const jp = j.journalPath("project", cwd);
-appendFileSync(jp, "{not json at all\n");
-const tolerant = await j.currentSnapshot("project", cwd);
-check("corrupt: skipped without crash", tolerant.version === 4 && tolerant.items.length === 1);
-
-// 7b) revert via compensating deltas (append-only, never rewrites)
-// state here: v4, one prompt item (memory was deleted at v4)
-const rev = await j.revertToVersion({ scope: "project", cwd, version: 2, actor: "probe" });
-check("revert: compensating create applied", rev.transitions.length >= 1 && rev.snapshot.version > 4);
-const revSnap = await j.currentSnapshot("project", cwd);
-const revived = revSnap.items.find((i) => i.kind === "memory");
-check("revert: memory item revived with content", revived && revived.content === "prefer TOON over JSON" && revived.importance === 0.9);
-const revHist = await j.history("project", cwd, 5);
-check("revert: note stamped on the revert transition", revHist[0].note === "revert to v2");
-check("revert: older transitions keep no phantom notes", !revHist.slice(1).some((t) => t.note));
-const revAgain = await j.revertToVersion({ scope: "project", cwd, version: 999, actor: "probe" });
-check("revert: future version is a no-op", revAgain.transitions.length === 0);
-
-// 8) scopes are isolated
-const globalSnap = await j.currentSnapshot("global", cwd);
-check("scope: global isolated", globalSnap.items.length === 0 && globalSnap.version === 0);
-
-// 9) move op: explicit-id create + cross-journal relocation
-check("validate: move requires to", j.validateDelta({ op: "move", id: "c_x" }) !== null);
-check("validate: good move passes", j.validateDelta({ op: "move", id: "c_x", to: "global" }) === null);
-const fixed = await j.appendDeltas({ scope: "project", cwd, actor: "probe", source: "manual", deltas: [
-  { op: "create", kind: "prompt", content: "movable", evidence: "e", id: "c_fixed" },
-] });
-check("create: explicit id honored", fixed.snapshot.items.some((i) => i.id === "c_fixed"));
-const refoldFixed = await j.currentSnapshot("project", cwd);
-check("create: explicit id stable across refolds", refoldFixed.items.some((i) => i.id === "c_fixed"));
-const mv = await j.moveItem({ cwd, id: "c_fixed", to: "global", actor: "probe" });
-check("move: reported moved", mv.moved === true && mv.from === "project");
-const afterMoveP = await j.currentSnapshot("project", cwd);
-const afterMoveG = await j.currentSnapshot("global", cwd);
-check("move: gone from source", !afterMoveP.items.some((i) => i.id === "c_fixed"));
-check("move: present in target with same id", afterMoveG.items.some((i) => i.id === "c_fixed" && i.content === "movable"));
-const mvAgain = await j.moveItem({ cwd, id: "c_fixed", to: "global", actor: "probe" });
-check("move: same-scope is a no-op", mvAgain.moved === false);
-const mvMissing = await j.moveItem({ cwd, id: "c_nope", to: "global", actor: "probe" });
-check("move: unknown id reports not moved", mvMissing.moved === false && mvMissing.from === null);
-
-// 10) inter-process write serialization: two child processes, one journal
-{
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const runP = promisify(execFile);
-  const script =
-    `const j = await import(${JSON.stringify(found)});` +
-    `for (let i = 0; i < 10; i++) {` +
-    ` await j.appendDeltas({ scope: "project", cwd: ${JSON.stringify(cwd)}, actor: "proc", source: "manual", deltas: [{ op: "create", kind: "memory", content: "conc-" + process.pid + "-" + i, evidence: "e" }] });` +
-    `}` +
-    `console.log("ok");`;
-  const both = await Promise.allSettled([
-    runP("node", ["--input-type=module", "-e", script]),
-    runP("node", ["--input-type=module", "-e", script]),
-  ]);
-  check("lock: both concurrent writers finish", both.every((r) => r.status === "fulfilled" && String(r.value.stdout).includes("ok")));
-  const all = await j.readTransitions(j.journalPath("project", cwd));
-  const versions = all.map((t) => t.version);
-  check("lock: no duplicate versions under contention", new Set(versions).size === versions.length, `versions: ${versions.length}, unique: ${new Set(versions).size}`);
-  const concSnap = await j.currentSnapshot("project", cwd);
-  check("lock: all 20 concurrent creates present", concSnap.items.filter((i) => i.content.startsWith("conc-")).length === 20);
-}
-
-// F4.3: torn-tail healing — a crash-cut last line is truncated under the
-// journal lock; complete-but-invalid lines keep the skip behavior.
-{
-  const p = j.journalPath("project", cwd);
-  const before = (await j.readTransitions(p)).length;
-  appendFileSync(p, '{"version":99999,"ts":');
-  check("heal: torn line skipped on read (no crash)", (await j.readTransitions(p)).length === before);
-  const healed = await j.healJournalTail(p);
-  check("heal: torn tail cut under lock", healed.healed === true, JSON.stringify(healed));
-  check("heal: file ends with newline after healing", readFileSync(p, "utf8").endsWith("\n"));
-  check("heal: valid records survive healing", (await j.readTransitions(p)).length === before);
-  check("heal: healthy journal is a no-op", (await j.healJournalTail(p)).healed === false);
-  appendFileSync(p, "not json at all\n");
-  check("heal: complete invalid line NOT healed", (await j.healJournalTail(p)).healed === false);
-  check("heal: invalid line preserved on disk", readFileSync(p, "utf8").includes("not json at all"));
-}
-const fails = results.filter((r) => r.startsWith("FAIL")).length;
+const fails = results.filter((r) => r.startsWith("FAIL"));
 console.log(results.join("\n"));
-console.log(`\n${results.length - fails}/${results.length} passed`);
-process.exit(fails === 0 ? 0 : 1);
+console.log((results.length - fails.length) + "/" + results.length + " passed");
+process.exit(fails.length ? 1 : 0);

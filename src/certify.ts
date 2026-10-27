@@ -31,7 +31,7 @@ export interface CertifyMeshEvent {
 export interface CertifyOutcome {
   results: CertifyItemResult[];
   applied: number;
-  version: number;
+  snapshot: string;
   meshEvents: CertifyMeshEvent[];
 }
 
@@ -100,11 +100,11 @@ export async function certifyItems(opts: {
     });
   }
   let applied = 0;
-  let version = snap.version;
+  let snapshot = snap.digest8;
   if (deltas.length > 0) {
     const out = await appendDeltas({ scope: opts.scope, cwd: opts.cwd, actor, source: "manual", deltas });
     applied = out.transitions.length;
-    version = out.snapshot.version;
+    snapshot = out.snapshot.digest8;
   }
   const meshEvents: CertifyMeshEvent[] = results
     .filter((r): r is CertifyItemResult & { status: CertStatus } => r.status === "certified" || r.status === "violated")
@@ -113,5 +113,5 @@ export async function certifyItems(opts: {
       kind: r.status,
       data: { id: r.id, status: r.status, at: now, ...(r.digest ? { digest: r.digest } : {}) },
     }));
-  return { results, applied, version, meshEvents };
+  return { results, applied, snapshot, meshEvents };
 }

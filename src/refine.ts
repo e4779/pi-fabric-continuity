@@ -38,7 +38,7 @@ export interface RefineResult {
   proposed: number;
   applied: number;
   summary: string;
-  version: number;
+  snapshot: string;
   /** F1.4: decay proposals journaled this run (importance decreases). */
   decay?: number;
   /** v0.5: items the proposer re-targeted (update/delete) this run. */
@@ -80,13 +80,13 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   const evidence = gatherEvidence(branch, lookback);
   if (!evidence.trim()) {
     await ctx.ui.notify("continuity refine: skipped — no trajectory evidence found", "info");
-    return { ...base, evidenceBytes: 0, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no trajectory evidence" };
+    return { ...base, evidenceBytes: 0, proposed: 0, applied: 0, summary: "", snapshot: snap.digest8, skipped: "no trajectory evidence" };
   }
   const registry = ctx.modelRegistry;
   const model = (ctx as unknown as { model?: unknown }).model as Parameters<typeof registry.complete>[0] | undefined;
   if (!registry || !model) {
     await ctx.ui.notify("continuity refine: skipped — no model registry or active model", "info");
-    return { ...base, evidenceBytes: evidence.length, proposed: 0, applied: 0, summary: "", version: snap.version, skipped: "no model registry or active model" };
+    return { ...base, evidenceBytes: evidence.length, proposed: 0, applied: 0, summary: "", snapshot: snap.digest8, skipped: "no model registry or active model" };
   }
 
   // F2: optional vcc evidence — bounded vcc_recall output under a labeled
@@ -142,7 +142,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
   });
 
   let applied = 0;
-  let version = snap.version;
+  let snapshot = snap.digest8;
   const routed: string[] = [];
   const actor = `model:${modelId.provider}/${modelId.id}`;
   if (deltas.length > 0) {
@@ -150,7 +150,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       if (group.length === 0) continue;
       const out = await appendDeltas({ scope: targetScope, cwd, actor, source: "refine", deltas: group });
       applied += out.transitions.length;
-      if (targetScope === scope) version = out.snapshot.version;
+      if (targetScope === scope) snapshot = out.snapshot.digest8;
       routed.push(`${group.length}->${targetScope}`);
     }
     // Deliver to the transcript only while a run is live; for an idle session
@@ -161,7 +161,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
         summary: parsed?.summary ?? "",
         applied,
         routed,
-        version,
+        snapshot,
         ts: Date.now(),
       });
     }
@@ -197,7 +197,7 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       const out = await appendDeltas({ scope: targetScope, cwd, actor, source: "refine", deltas: group, note: "attribution decay" });
       decay += out.transitions.length;
       applied += out.transitions.length;
-      version = Math.max(version, out.snapshot.version);
+      snapshot = out.snapshot.digest8;
     }
   } catch {
     // Decay is advisory — a counters/config problem must not fail the run.
@@ -216,8 +216,8 @@ export async function runRefine(pi: ExtensionAPI, ctx: ExtensionContext, opts: R
       : parsed?.salvaged
         ? `salvaged ${parsed.deltas.length} delta(s) from a truncated reply`
         : parsed?.summary || (applied === 0 ? "no changes warranted" : "");
-  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${confirmed > 0 ? `, ${confirmed} confirmed` : ""}${decay > 0 ? `, ${decay} decay` : ""}${routed.length ? " [" + routed.join(", ") + "]" : ""}, journal v${version})`, "info");
-  return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, version, ...(confirmed > 0 ? { confirmed } : {}), ...(decay > 0 ? { decay } : {}) };
+  await ctx.ui.notify(`continuity refine: ${summary} (${applied} delta(s)${confirmed > 0 ? `, ${confirmed} confirmed` : ""}${decay > 0 ? `, ${decay} decay` : ""}${routed.length ? " [" + routed.join(", ") + "]" : ""}, snapshot ${snapshot})`, "info");
+  return { ...base, evidenceBytes: evidence.length, proposed: parsed?.deltas.length ?? 0, applied, summary, snapshot, ...(confirmed > 0 ? { confirmed } : {}), ...(decay > 0 ? { decay } : {}) };
 }
 
 // turn_end cadence — module state, reset on session_start.

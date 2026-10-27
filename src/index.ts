@@ -20,7 +20,7 @@ export default function piFabricContinuity(pi: ExtensionAPI): void {
     try {
       const snap = await currentSnapshot("project", sessionCwdOf(ctx));
       if (snap.items.length > 0) {
-        ctx.ui.notify(`continuity: ${snap.items.length} harness item(s) restored (journal v${snap.version})`, "info");
+        ctx.ui.notify(`continuity: ${snap.items.length} harness item(s) restored (snapshot ${snap.digest8})`, "info");
       }
     } catch {
       // Journal reads must never break session start.
@@ -33,6 +33,6 @@ export default function piFabricContinuity(pi: ExtensionAPI): void {
   registerAutoRefine(pi);
 }
 
-export { appendDeltas, currentSnapshot, healJournalTail, history, journalPath, readTransitions, validateDelta } from "./journal.js";
+export { appendDeltas, currentSnapshot, healJournalTail, history, journalPath, readScopeTransitions, revertItems, validateDelta } from "./journal.js";
 export { certifyItems } from "./certify.js";
 export type { CertStatus, ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";

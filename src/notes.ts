@@ -48,6 +48,9 @@ export interface NotesFold {
   orphans: number;
   /** Item ids with sibling supersession heads (forks surfaced, not hidden). */
   conflicts: string[];
+  /** id -> hash of the note that last applied (the item's current head) —
+   *  the pin source appendDeltas resolves supersedesFile from. */
+  headPins: Map<string, string>;
 }
 
 const HOST_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
@@ -155,10 +158,11 @@ export async function writeNotesDir(dir: string, writes: NoteWrite[]): Promise<{
       // note file (record.target) — folds must never regenerate ids (v0.5
       // appendDeltas discipline, carried into the envelope).
       let target = w.target;
-      if (w.delta.op === "create" && target === undefined && w.delta.id === undefined) {
-        // Legacy creates without a recorded target must NOT genId() — both
-        // machines must emit byte-identical files (F6.6, review finding 10).
-        target = wHost === "legacy" ? `c_legacy_${sha256Hex(canonicalJson(w.delta)).slice(0, 12)}` : genId();
+      if (w.delta.op === "create" && target === undefined) {
+        // v0.5 parity: the touched id must be PERSISTED as record.target —
+        // explicit delta.id when given; legacy creates derive it from content
+        // (byte-identical across machines, F6.6); fresh creates genId().
+        target = w.delta.id ?? (wHost === "legacy" ? `c_legacy_${sha256Hex(canonicalJson(w.delta)).slice(0, 12)}` : genId());
       }
       const record: NoteRecord = {
         ts: w.ts ?? Date.now(),
@@ -222,20 +226,22 @@ function isMutation(d: Delta): d is MutationDelta {
 
 /** Fold a note directory: filename order (never readdir), multi-pass orphan
  *  adoption (late/skewed parents), pin checks, fork surfacing, digest (F6.3). */
-export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
+/** Read + validate + order a note directory: filename order only, hash
+ *  integrity pinned, unparseable files skipped and counted (never mutated).
+ *  Shared by foldDir and readScopeTransitions — one ordering discipline. */
+export async function listNotes(dir: string): Promise<{ notes: LoadedNote[]; skipped: number }> {
   let names: string[] = [];
   try {
     names = (await readdir(dir)).filter((n) => n.endsWith(".json") && !n.startsWith("."));
   } catch {
-    return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [] };
+    return { notes: [], skipped: 0 };
   }
-  const skipped = { n: 0 };
-  const loaded: LoadedNote[] = [];
-  const pinOwner = new Map<string, string>(); // hash8 -> item id it mutates
+  let skipped = 0;
+  const notes: LoadedNote[] = [];
   for (const name of names) {
     const meta = parseNoteFileName(name);
     if (!meta) {
-      skipped.n += 1;
+      skipped += 1;
       continue;
     }
     let record: NoteRecord | undefined;
@@ -246,18 +252,29 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
     }
     const d = record?.delta as { op?: unknown } | undefined;
     if (!record || typeof record.ts !== "number" || typeof record.host !== "string" || typeof record.seq !== "number" || !d || typeof d.op !== "string") {
-      skipped.n += 1;
+      skipped += 1;
       continue;
     }
     // Content-address integrity: filename hash must pin the file bytes (F6.1).
     if (noteContentHash(record).slice(0, meta.hash.length) !== meta.hash) {
-      skipped.n += 1;
+      skipped += 1;
       continue;
     }
-    loaded.push({ meta, record });
+    notes.push({ meta, record });
   }
   const cmp = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0);
-  loaded.sort((a, b) => a.meta.ts - b.meta.ts || cmp(a.meta.host, b.meta.host) || a.meta.seq - b.meta.seq || cmp(a.meta.hash, b.meta.hash));
+  notes.sort((a, b) => a.meta.ts - b.meta.ts || cmp(a.meta.host, b.meta.host) || a.meta.seq - b.meta.seq || cmp(a.meta.hash, b.meta.hash));
+  return { notes, skipped };
+}
+
+export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
+  const { notes: loaded, skipped: skippedBase } = await listNotes(dir);
+  if (loaded.length === 0 && skippedBase === 0) {
+    return { items: [], digest: sha256Hex(""), digest8: sha256Hex("").slice(0, 8), fileCount: 0, skipped: 0, orphans: 0, conflicts: [], headPins: new Map() };
+  }
+  const skipped = { n: skippedBase };
+  const pinOwner = new Map<string, string>(); // hash8 -> item id it mutates
+  const cmp = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0);
 
   // Deterministic pin ownership: built from the SORTED array — readdir order
   // must never leak into fold results (review finding 4).
@@ -309,6 +326,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
   };
   const isSkip = (r: string | null | undefined): r is "SKIP" => r === "SKIP";
 
+  const headPins = new Map<string, string>();
   let queue = loaded;
   let orphans = 0;
   for (let pass = 0; pass < 6; pass++) {
@@ -319,6 +337,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
       const res = apply(ln);
       if (isSkip(res)) skipInc += 1;
       else if (res === null && isMutation(ln.record.delta)) failed.push(ln);
+      else if (typeof res === "string") headPins.set(res, ln.meta.hash);
     }
     skipped.n += skipInc;
     if (failed.length === 0) {
@@ -342,6 +361,7 @@ export async function foldDir(dir: string, scope: Scope): Promise<NotesFold> {
     skipped: skipped.n,
     orphans,
     conflicts,
+    headPins,
   };
 }
 

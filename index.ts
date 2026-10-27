@@ -6,7 +6,7 @@ export {
   currentSnapshot,
   history,
   journalPath,
-  readTransitions,
+  readScopeTransitions,
   validateDelta,
 } from "./src/index.js";
 export type { ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./src/index.js";

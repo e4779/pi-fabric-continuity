@@ -5,7 +5,7 @@
 // Deliberately dumb: toLowerCase + indexOf, no LLM, no ranking, no regex —
 // a search hit must never depend on a model or misread metacharacters.
 
-import { currentSnapshot, journalPath, readTransitions } from "./journal.js";
+import { currentSnapshot, readScopeTransitions } from "./journal.js";
 import type { ComponentKind, Scope, Transition } from "./types.js";
 
 /** Hard cap on returned hits — a search result stays bounded by design. */
@@ -68,7 +68,7 @@ type TextAsOf = Partial<Record<"content" | "evidence", { version: number; ts: nu
 /** One journal's search: a read-only walk for historical text spots plus the
  *  current snapshot for live items. Never touches the journal. */
 async function searchOneScope(scope: Scope, cwd: string | undefined, queryLower: string): Promise<SearchHit[]> {
-  const transitions = await readTransitions(journalPath(scope, cwd));
+  const transitions = await readScopeTransitions(scope, cwd);
 
   // Historical item text: every content/evidence value a transition ever
   // carried, deduped per (id, version) with content preferred.
@@ -130,7 +130,7 @@ async function searchOneScope(scope: Scope, cwd: string | undefined, queryLower:
       current: true,
       kind: it.kind,
       active: it.active,
-      version: asOf?.version ?? snap.version,
+      version: asOf?.version ?? 0,
       ts: asOf?.ts ?? it.updatedAt,
       field,
       snippet: boundedSnippet(field === "content" ? it.content : it.evidence, at, queryLower.length),

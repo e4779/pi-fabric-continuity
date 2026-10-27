@@ -80,6 +80,10 @@ export interface Transition {
 }
 
 export interface JournalSnapshot {
-  version: number;
+  /** v0.6: sha256 over the sorted note content hashes (first 8 hex) —
+   *  snapshot identity; the per-file version counter is retired (F6.3). */
+  digest8: string;
+  /** Number of note files in the fold (monotonicity companion to digest8). */
+  fileCount: number;
   items: HarnessItem[];
 }

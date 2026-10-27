@@ -1,11 +1,18 @@
-// Provider-owned harness-state journal: append-only JSONL of transitions.
-// One authority (the journal); snapshots are derived by folding, never primary.
-// Storage layout: ~/.pi/agent/continuity/global/journal.jsonl and
-// ~/.pi/agent/continuity/projects/<slug>/journal.jsonl (slug from cwd).
+// journal — v0.6 facade over the atomic note store (src/notes.ts).
+// One authority stays, reshaped: a directory of immutable content-addressed
+// note files, folded on read (docs/spec-v0.6.md). Legacy JSONL auto-migrates
+// on first scope open (src/migrate.ts, marker-guarded), then is ignored.
+// Torn tails, per-file version counters and tail healing are gone by
+// construction; healJournalTail stays as a deprecated no-op for import
+// compatibility. Transition.version = 1-based position in fold order: a
+// stable within-fold anchor for search citations and history.
 
-import { appendFile, mkdir, open, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { foldDir, listNotes, noteDir, writeNotesDir } from "./notes.js";
+import type { NoteRecord } from "./notes.js";
+import { migrateLegacyScope } from "./migrate.js";
 import type { ComponentKind, Delta, HarnessItem, JournalSnapshot, Scope, Transition } from "./types.js";
 
 const ROOT = join(homedir(), ".pi", "agent", "continuity");
@@ -18,6 +25,7 @@ export function projectSlug(cwd: string): string {
   return slug || "default";
 }
 
+/** Legacy JSONL path — still the migration INPUT and operator display. */
 export function journalPath(scope: Scope, cwd?: string): string {
   if (scope === "global") return join(ROOT, "global", "journal.jsonl");
   return join(ROOT, "projects", projectSlug(cwd ?? process.cwd()), "journal.jsonl");
@@ -82,8 +90,8 @@ export function validateDelta(d: unknown): string | null {
 }
 
 /** Apply one delta to the fold state. Returns the touched item id, when resolvable.
- *  'target' is the recorded id from the journal line: folds MUST reuse it, or
- *  ids would be regenerated on every read and updates/deletes would miss. */
+ *  'target' is the recorded id from the note: folds MUST reuse it, or ids
+ *  would be regenerated on every read and updates/deletes would miss. */
 export function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, scope: Scope, target?: string): string | null {
   if (delta.op === "create") {
     const explicit = target ?? (typeof (delta as { id?: unknown }).id === "string" && (delta as { id?: string }).id ? (delta as { id?: string }).id : undefined);
@@ -136,8 +144,98 @@ export function splitByScope(deltas: Delta[], defaultScope: Scope): Map<Scope, D
   }
   return out;
 }
-/** Move an item between scopes: delete from the source journal, recreate with
- *  the same id in the target journal. Both transitions are journaled. */
+
+/** v0.6: ensure the scope's legacy JSONL (if any) has been split into notes.
+ *  Marker-guarded and idempotent; never throws — migration must not break
+ *  the provider seam (spec F6.6, auto-migrate on first open). */
+async function ensureMigrated(scope: Scope, cwd?: string): Promise<void> {
+  try {
+    await migrateLegacyScope({ scope, cwd });
+  } catch {
+    // The seam stays usable even when migration hiccups; the legacy journal
+    // remains in place for a manual re-run with force.
+  }
+}
+
+function toTransition(r: NoteRecord, version: number): Transition {
+  return {
+    version,
+    ts: r.ts,
+    actor: r.actor,
+    source: r.source,
+    delta: r.delta,
+    ...(r.target !== undefined ? { target: r.target } : {}),
+    ...(r.note !== undefined ? { note: r.note } : {}),
+  };
+}
+
+/** The scope's notes as transitions in fold order; version = 1-based
+ *  position — stable within a fold, comparable for search/history. */
+export async function readScopeTransitions(scope: Scope, cwd?: string): Promise<Transition[]> {
+  await ensureMigrated(scope, cwd);
+  const { notes } = await listNotes(await noteDir(scope, cwd));
+  return notes.map((ln, i) => toTransition(ln.record, i + 1));
+}
+
+export async function history(scope: Scope, cwd?: string, limit = 20): Promise<Transition[]> {
+  const all = await readScopeTransitions(scope, cwd);
+  return all.slice(-limit);
+}
+
+/** Deprecated no-op: note files cannot tear (tmp+rename atomicity, I3). */
+export async function healJournalTail(): Promise<{ healed: boolean }> {
+  return { healed: false };
+}
+
+export async function currentSnapshot(scope: Scope, cwd?: string): Promise<JournalSnapshot> {
+  await ensureMigrated(scope, cwd);
+  const f = await foldDir(await noteDir(scope, cwd), scope);
+  return { digest8: f.digest8, fileCount: f.fileCount, items: f.items };
+}
+
+export interface AppendOutcome {
+  transitions: Transition[];
+  snapshot: JournalSnapshot;
+}
+
+export interface AppendOptions {
+  scope: Scope;
+  cwd?: string;
+  actor: string;
+  source: Transition["source"];
+  deltas: Delta[];
+  note?: string;
+}
+
+/** Atomic batch append onto the note store: every delta validated before
+ *  anything is written; update/delete notes carry supersedesFile pins
+ *  resolved from the current fold heads ("pending" when the target has not
+ *  arrived yet — orphan-tolerant, spec F6.3). */
+export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> {
+  for (const d of opts.deltas) {
+    const err = validateDelta(d);
+    if (err) throw new Error(err);
+  }
+  await ensureMigrated(opts.scope, opts.cwd);
+  const dir = await noteDir(opts.scope, opts.cwd);
+  const head = await foldDir(dir, opts.scope);
+  const writes = opts.deltas.map((d) => ({
+    actor: opts.actor,
+    source: opts.source,
+    delta: d,
+    ...(opts.note !== undefined ? { note: opts.note } : {}),
+    ...((d.op === "update" || d.op === "delete") ? { supersedesFile: head.headPins.get(d.id) ?? "pending" } : {}),
+  }));
+  const { metas, records } = await writeNotesDir(dir, writes);
+  const fold = await foldDir(dir, opts.scope);
+  const { notes: all } = await listNotes(dir);
+  const versionByName = new Map(all.map((ln, i) => [ln.meta.name, i + 1] as const));
+  const transitions = records.map((r, i) => toTransition(r, versionByName.get(metas[i]!.name) ?? 0));
+  return { transitions, snapshot: { digest8: fold.digest8, fileCount: fold.fileCount, items: fold.items } };
+}
+
+/** Move an item between scopes: delete from the source store, recreate with
+ *  the same id in the target store. Both transitions are journaled. */
 export async function moveItem(opts: {
   cwd?: string;
   id: string;
@@ -181,94 +279,57 @@ export async function moveItem(opts: {
   await appendDeltas({ scope: opts.to, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas: destDeltas, note: `moved from ${from}` });
   return { from, to: opts.to, moved: true, item };
 }
+
 export function sortItems(items: HarnessItem[]): HarnessItem[] {
   return [...items].sort((a, b) => b.importance - a.importance || a.createdAt - b.createdAt);
 }
 
-export async function readTransitions(path: string): Promise<Transition[]> {
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    return [];
-  }
-  const out: Transition[] = [];
-  for (const line of raw.split("\n")) {
-    const s = line.trim();
-    if (!s) continue;
-    try {
-      const t = JSON.parse(s) as Transition;
-      if (t && typeof t.version === "number" && t.delta) out.push(t);
-    } catch {
-      // Journal discipline: reads never crash on a corrupt line; it is skipped.
+/** v0.6 revert: undo the LAST mutation of each named item by emitting
+ *  inverse deltas (single-note undo, spec F6.4 — version anchors retired). */
+export async function revertItems(opts: { scope: Scope; cwd?: string; ids: string[]; actor: string }): Promise<AppendOutcome> {
+  const all = await readScopeTransitions(opts.scope, opts.cwd);
+  const deltas: Delta[] = [];
+  for (const id of opts.ids) {
+    const own = all.filter((t) => (t.target ?? (t.delta as { id?: string }).id) === id);
+    if (own.length === 0) continue;
+    const last = own[own.length - 1]!;
+    const items = new Map<string, HarnessItem>();
+    for (const t of own.slice(0, -1)) applyDelta(items, t.delta, t.ts, opts.scope, t.target);
+    const prev = items.get(id) ?? null;
+    if (last.delta.op === "create") {
+      if (prev) {
+        deltas.push({ op: "update", id, content: prev.content, evidence: prev.evidence, importance: prev.importance, ...(prev.active ? {} : { active: false }) });
+      } else {
+        deltas.push({ op: "delete", id, reason: "revert: undo create" });
+      }
+    } else if (last.delta.op === "delete" && prev) {
+      deltas.push({ op: "create", kind: prev.kind, content: prev.content, evidence: prev.evidence, importance: prev.importance, ...(prev.models ? { models: prev.models } : {}), id });
+      if (!prev.active) deltas.push({ op: "update", id, active: false });
+    } else {
+      const cur = (await currentSnapshot(opts.scope, opts.cwd)).items.find((i) => i.id === id) ?? null;
+      if (prev && cur) {
+        const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean } = { op: "update", id };
+        if (cur.content !== prev.content) upd.content = prev.content;
+        if (cur.evidence !== prev.evidence) upd.evidence = prev.evidence;
+        if (cur.importance !== prev.importance) upd.importance = prev.importance;
+        if (cur.active !== prev.active) upd.active = prev.active;
+        if (Object.keys(upd).length > 2) deltas.push(upd);
+      } else if (!prev && cur) {
+        deltas.push({ op: "delete", id, reason: "revert: undo to before first record" });
+      }
     }
   }
-  return out;
-}
-
-/** F4.3: a torn tail is a last line WITHOUT a trailing newline that fails to
- *  parse — the signature of a write cut mid-line by a crash (power loss,
- *  SIGKILL). Complete-but-invalid lines keep the skip behavior: never healed,
- *  never rewritten. (Port of prime-agent #3387 discipline to our JSONL.) */
-function tailIsTorn(raw: string): boolean {
-  if (raw === "" || raw.endsWith("\n")) return false;
-  const tail = raw.slice(raw.lastIndexOf("\n") + 1).trim();
-  if (tail === "") return false;
-  try {
-    const t = JSON.parse(tail) as Transition;
-    return !(t && typeof t.version === "number" && t.delta);
-  } catch {
-    return true;
+  if (deltas.length === 0) {
+    const snap = await currentSnapshot(opts.scope, opts.cwd);
+    return { transitions: [], snapshot: snap };
   }
-}
-
-/** Heal under an ALREADY-HELD journal lock. Re-reads and re-checks, so a
- *  writer that completed the line after our first look wins — valid data is
- *  never truncated. Returns healed: false when the tail is fine. */
-async function healTailInPlace(path: string): Promise<{ healed: boolean; droppedBytes?: number }> {
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    return { healed: false };
-  }
-  if (!tailIsTorn(raw)) return { healed: false };
-  const cut = raw.lastIndexOf("\n") + 1;
-  await writeFile(path, raw.slice(0, cut), "utf8");
-  return { healed: true, droppedBytes: raw.length - cut };
-}
-
-/** Locking wrapper for read paths (currentSnapshot). Never throws: healing
- *  is best-effort recovery, and reads must work even when the lock is busy. */
-export async function healJournalTail(path: string): Promise<{ healed: boolean; droppedBytes?: number }> {
-  try {
-    return await withJournalLock(path, () => healTailInPlace(path));
-  } catch {
-    return { healed: false };
-  }
-}
-
-export async function currentSnapshot(scope: Scope, cwd?: string): Promise<JournalSnapshot> {
-  // F4.3: cut a crash-torn tail before folding (no-op for healthy journals).
-  await healJournalTail(journalPath(scope, cwd));
-  const transitions = await readTransitions(journalPath(scope, cwd));
-  const items = new Map<string, HarnessItem>();
-  let version = 0;
-  for (const t of transitions) {
-    version = Math.max(version, t.version);
-    applyDelta(items, t.delta, t.ts, scope, t.target);
-  }
-  return { version, items: sortItems([...items.values()]) };
-}
-
-export interface AppendOutcome {
-  transitions: Transition[];
-  snapshot: JournalSnapshot;
+  return appendDeltas({ scope: opts.scope, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas, note: "revert: single-note undo" });
 }
 
 /** Inter-process writer lock: exclusive-create with stale takeover.
- *  Serializes read-version + append across pi sessions sharing one journal.
- *  Also guards other continuity state files (counters read-modify-write). */
+ *  Serializes note batches and counters read-modify-write across pi
+ *  sessions sharing one machine (the cross-machine race is impossible by
+ *  I2 — one writer per file). */
 export async function withJournalLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await mkdir(dirname(path), { recursive: true });
   const lockPath = path + ".lock";
@@ -296,123 +357,4 @@ export async function withJournalLock<T>(path: string, fn: () => Promise<T>): Pr
     await handle.close();
     await unlink(lockPath).catch(() => {});
   }
-}
-
-export interface AppendOptions {
-  scope: Scope;
-  cwd?: string;
-  actor: string;
-  source: Transition["source"];
-  deltas: Delta[];
-  note?: string;
-}
-
-/** Atomic batch append: every delta is validated before anything is written.
- *  Writers are serialized per journal (inter-process lock), so concurrent pi
- *  sessions in one directory cannot collide on versions. */
-export async function appendDeltas(opts: AppendOptions): Promise<AppendOutcome> {
-  for (const d of opts.deltas) {
-    const err = validateDelta(d);
-    if (err) throw new Error(err);
-  }
-  const path = journalPath(opts.scope, opts.cwd);
-  return withJournalLock(path, () => appendDeltasLocked(opts, path));
-}
-
-async function appendDeltasLocked(opts: AppendOptions, path: string): Promise<AppendOutcome> {
-  await healTailInPlace(path); // we hold the lock — heal before folding
-  const existing = await readTransitions(path);
-  let version = existing.reduce((m, t) => Math.max(m, t.version), 0);
-  const items = new Map<string, HarnessItem>();
-  for (const t of existing) applyDelta(items, t.delta, t.ts, opts.scope, t.target);
-
-  const transitions: Transition[] = [];
-  const lines: string[] = [];
-  for (const delta of opts.deltas) {
-    const ts = Date.now();
-    const target = applyDelta(items, delta, ts, opts.scope);
-    version += 1;
-    const transition: Transition = {
-      version,
-      ts,
-      actor: opts.actor,
-      source: opts.source,
-      delta,
-      ...(target ? { target } : {}),
-      ...(opts.note ? { note: opts.note } : {}),
-    };
-    transitions.push(transition);
-    lines.push(JSON.stringify(transition));
-  }
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, lines.map((l) => l + "\n").join(""), "utf8");
-  return { transitions, snapshot: { version, items: sortItems([...items.values()]) } };
-}
-
-/** Revert to a journal version by appending compensating deltas.
- *  The journal is append-only: revert never rewrites history, it emits the
- *  diff between the current fold and the fold at 'version' as new deltas. */
-export async function revertToVersion(opts: {
-  scope: Scope;
-  cwd?: string;
-  version: number;
-  actor: string;
-}): Promise<AppendOutcome> {
-  const path = journalPath(opts.scope, opts.cwd);
-  return withJournalLock(path, async () => {
-    const transitions = await readTransitions(path);
-    const latest = transitions.reduce((m, t) => Math.max(m, t.version), 0);
-    const targetVersion = Math.min(Math.max(0, Math.floor(opts.version)), latest);
-    if (targetVersion >= latest) {
-      const snap = await currentSnapshot(opts.scope, opts.cwd);
-      return { transitions: [], snapshot: snap };
-    }
-
-    const target = new Map<string, HarnessItem>();
-    const current = new Map<string, HarnessItem>();
-    for (const t of transitions) {
-      applyDelta(current, t.delta, t.ts, opts.scope, t.target);
-      if (t.version <= targetVersion) applyDelta(target, t.delta, t.ts, opts.scope, t.target);
-    }
-
-    const deltas: Delta[] = [];
-    for (const [id, it] of target) {
-      const cur = current.get(id);
-      if (!cur) {
-        deltas.push({
-          op: "create",
-          kind: it.kind,
-          content: it.content,
-          evidence: it.evidence,
-          importance: it.importance,
-          ...(it.models ? { models: it.models } : {}),
-        });
-        if (!it.active) deltas.push({ op: "update", id, active: false });
-        continue;
-      }
-      const upd: { op: "update"; id: string; content?: string; evidence?: string; importance?: number; active?: boolean; models?: string[] } = { op: "update", id };
-      if (cur.content !== it.content) upd.content = it.content;
-      if (cur.evidence !== it.evidence) upd.evidence = it.evidence;
-      if (cur.importance !== it.importance) upd.importance = it.importance;
-      if (cur.active !== it.active) upd.active = it.active;
-      if ((cur.models ?? undefined) !== (it.models ?? undefined)) upd.models = it.models;
-      if (Object.keys(upd).length > 2) deltas.push(upd);
-    }
-    for (const id of current.keys()) {
-      if (!target.has(id)) deltas.push({ op: "delete", id, reason: `reverted: absent at v${targetVersion}` });
-    }
-
-    if (deltas.length === 0) {
-      const snap = await currentSnapshot(opts.scope, opts.cwd);
-      return { transitions: [], snapshot: snap };
-    }
-    return appendDeltasLocked(
-      { scope: opts.scope, cwd: opts.cwd, actor: opts.actor, source: "manual", deltas, note: `revert to v${targetVersion}` },
-      path,
-    );
-  });
-}
-export async function history(scope: Scope, cwd?: string, limit = 20): Promise<Transition[]> {
-  const transitions = await readTransitions(journalPath(scope, cwd));
-  return transitions.slice(-limit).reverse();
 }

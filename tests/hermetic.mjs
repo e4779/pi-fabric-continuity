@@ -32,5 +32,6 @@ export function resetJournals(j, combos) {
       throw new Error(`refusing to reset a real journal: ${p}`);
     }
     rmSync(p, { force: true });
+    rmSync(join(p, ".."), { recursive: true, force: true }); // v0.6: wipe the note dir, not just the legacy file
   }
 }

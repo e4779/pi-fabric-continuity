@@ -49,7 +49,8 @@ async function loadProtocolModule(): Promise<FabricProtocolModule> {
 const protocol = await loadProtocolModule();
 const FABRIC_PROVIDER_DISCOVER_EVENT: string = protocol.FABRIC_PROVIDER_DISCOVER_EVENT as string;
 const FABRIC_PROVIDER_REGISTER_EVENT: string = protocol.FABRIC_PROVIDER_REGISTER_EVENT as string;
-import { appendDeltas, currentSnapshot, history, journalPath, moveItem, revertToVersion, splitByScope, validateDelta } from "./journal.js";
+import { appendDeltas, currentSnapshot, history, moveItem, revertItems, splitByScope, validateDelta } from "./journal.js";
+import { noteDir } from "./notes.js";
 import { auditItems, proposedDeltas } from "./audit.js";
 import { searchItems } from "./search.js";
 import { certifyItems } from "./certify.js";
@@ -65,7 +66,7 @@ function descriptors(): FabricActionDescriptor[] {
   return [
     {
       name: "status",
-      description: "Continuity snapshot summary: journal version, item counts by kind, journal path.",
+      description: "Continuity snapshot summary: snapshot digest + note count, item counts by kind, store path.",
       risk: "read",
       inputSchema: { type: "object", properties: { scope: scopeSchema, cwd: str }, additionalProperties: false },
     },
@@ -117,9 +118,9 @@ function descriptors(): FabricActionDescriptor[] {
     },
     {
       name: "revert",
-      description: "Revert the harness state to a given journal version by appending compensating deltas (the journal is append-only; history is never rewritten).",
+      description: "Undo the LAST mutation of each named item by emitting inverse deltas (single-note undo; append-only, history is never rewritten). Accepts item ids.",
       risk: "write",
-      inputSchema: { type: "object", properties: { version: { type: "number" }, scope: scopeSchema, cwd: str }, required: ["version"], additionalProperties: false },
+      inputSchema: { type: "object", properties: { ids: { type: "array", items: { type: "string" }, minItems: 1 }, scope: scopeSchema, cwd: str }, required: ["ids"], additionalProperties: false },
     },
     {
       name: "mutate",
@@ -164,11 +165,12 @@ function makeProvider(): FabricProvider {
           for (const it of snap.items) byKind[it.kind] = (byKind[it.kind] ?? 0) + 1;
           return {
             scope,
-            version: snap.version,
+            snapshot: snap.digest8,
+            notes: snap.fileCount,
             total: snap.items.length,
             active: snap.items.filter((i) => i.active).length,
             byKind,
-            journal: journalPath(scope, cwd),
+            store: await noteDir(scope, cwd),
           };
         }
         case "list": {
@@ -177,7 +179,7 @@ function makeProvider(): FabricProvider {
           const kind = args.kind as ComponentKind | undefined;
           if (kind) items = items.filter((i) => i.kind === kind);
           if (args.activeOnly !== false) items = items.filter((i) => i.active);
-          return { scope, version: snap.version, items };
+          return { scope, snapshot: snap.digest8, items };
         }
         case "read": {
           const id = args.id as string;
@@ -211,19 +213,20 @@ function makeProvider(): FabricProvider {
           const config = await loadConfig();
           return {
             scope,
-            version: snap.version,
+            snapshot: snap.digest8,
+            notes: snap.fileCount,
             decayAfterInjections: config.decayAfterInjections,
             stats: statsForItems(snap.items, counters, config.decayAfterInjections),
           };
         }
         case "revert": {
-          const version = typeof args.version === "number" ? Math.floor(args.version) : NaN;
-          if (!Number.isFinite(version) || version < 0) throw new Error("version must be a non-negative number");
-          const out = await revertToVersion({ scope, cwd, version, actor });
+          const ids = Array.isArray(args.ids) ? (args.ids as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+          if (ids.length === 0) throw new Error("ids must be a non-empty array of item ids");
+          const out = await revertItems({ scope, cwd, ids, actor });
           return {
-            revertedTo: version,
+            reverted: ids.length,
             applied: out.transitions.length,
-            version: out.snapshot.version,
+            snapshot: out.snapshot.digest8,
           };
         }
         case "mutate": {
@@ -243,16 +246,16 @@ function makeProvider(): FabricProvider {
             moved.push({ id: mv.id, from: r.from, to: mv.to, moved: r.moved });
           }
           let applied = 0;
-          let version = (await currentSnapshot(scope, cwd)).version;
+          let snapshot = (await currentSnapshot(scope, cwd)).digest8;
           const routed: string[] = [];
           for (const [targetScope, group] of splitByScope(rest, scope)) {
             if (group.length === 0) continue;
             const out = await appendDeltas({ scope: targetScope, cwd, actor, source, deltas: group });
             applied += out.transitions.length;
-            if (targetScope === scope) version = out.snapshot.version;
+            if (targetScope === scope) snapshot = out.snapshot.digest8;
             routed.push(`${group.length}->${targetScope}`);
           }
-          return { applied, version, routed, moved };
+          return { applied, snapshot, routed, moved };
         }
         default:
           throw new Error(`unknown continuity action: ${actionName}`);
