@@ -28,7 +28,7 @@ function clamp01(n: unknown, fallback: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
-function genId(): string {
+export function genId(): string {
   return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
@@ -84,7 +84,7 @@ export function validateDelta(d: unknown): string | null {
 /** Apply one delta to the fold state. Returns the touched item id, when resolvable.
  *  'target' is the recorded id from the journal line: folds MUST reuse it, or
  *  ids would be regenerated on every read and updates/deletes would miss. */
-function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, scope: Scope, target?: string): string | null {
+export function applyDelta(items: Map<string, HarnessItem>, delta: Delta, ts: number, scope: Scope, target?: string): string | null {
   if (delta.op === "create") {
     const explicit = target ?? (typeof (delta as { id?: unknown }).id === "string" && (delta as { id?: string }).id ? (delta as { id?: string }).id : undefined);
     const id = explicit ?? genId();

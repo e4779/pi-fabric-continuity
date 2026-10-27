@@ -19,6 +19,8 @@ export interface ContinuityConfig {
   vccEvidence: boolean;
   /** F4.1: per-command execution budget for certify. */
   certify: { timeoutMs: number };
+  /** v0.6: store root override (NOTES only; config/counters stay machine-local). */
+  store?: { dir?: string };
 }
 
 /** F1.4 — DECAY_AFTER_INJECTIONS from the spec. */
@@ -61,6 +63,12 @@ export async function loadConfig(): Promise<ContinuityConfig> {
             ? Math.floor((raw.certify as { timeoutMs: number }).timeoutMs)
             : DEFAULT_CONFIG.certify.timeoutMs,
       },
+      store:
+        typeof raw.store === "object" && raw.store !== null &&
+        typeof (raw.store as { dir?: unknown }).dir === "string" &&
+        (raw.store as { dir: string }).dir.trim()
+          ? { dir: (raw.store as { dir: string }).dir }
+          : undefined,
     };
   } catch {
     return {
